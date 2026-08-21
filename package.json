@@ -10,9 +10,6 @@
     "security-check": "node src/scripts/check-security.js"
   },
   "dependencies": {
-    "@supabase/auth-helpers-nextjs": "^0.10.0",
-    "@supabase/ssr": "^0.6.1",
-    "@supabase/supabase-js": "^2.49.4",
     "axios": "^1.6.7",
     "chart.js": "^4.4.1",
     "ethers": "^5.7.2",

@@ -1,5 +1,4 @@
 /** @type {import('next').NextConfig} */
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const workerUrl = process.env.NEXT_PUBLIC_WORKER_URL || '';
 
 const securityConfig = {
@@ -9,8 +8,6 @@ const securityConfig = {
   async headers() {
     const connectSrc = [
       "'self'",
-      "https://*.supabase.co",
-      supabaseUrl,
       workerUrl,
     ].filter(Boolean).join(' ');
 

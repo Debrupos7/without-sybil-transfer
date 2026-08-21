@@ -5,11 +5,12 @@ import { useWeb3 } from '@/context/Web3Context';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import { ethers } from 'ethers';
-import { supabase } from '@/utils/supabaseClient';
+import { getToken } from '@/utils/authClient';
 import {
   createTransaction,
   updateTransaction,
   getTransactionHistory,
+  getWalletGroups,
 } from '@/utils/workerClient';
 import Link from 'next/link';
 import { v4 as uuidv4 } from 'uuid';
@@ -106,7 +107,7 @@ const TransferForm = () => {
     }
   }, [user]);
   
-  // Fetch wallet groups from Supabase
+  // Fetch wallet groups from Worker
   const fetchWalletGroups = async () => {
     try {
       setIsLoadingGroups(true);
@@ -119,12 +120,8 @@ const TransferForm = () => {
         return;
       }
       
-      // Fetch wallet groups for the current user only
-      const { data, error } = await supabase
-        .from('wallet_groups')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('name');
+      const token = getToken();
+      const { data: groups, error } = await getWalletGroups(token);
       
       if (error) {
         console.error('Error fetching wallet groups:', error);
@@ -133,49 +130,13 @@ const TransferForm = () => {
         return;
       }
       
-      console.log(`Found ${data.length} wallet groups for user ${user.id}`);
-      
-      // Create a placeholder array with empty wallets
-      const groups = data.map((group) => ({
+      // Worker returns groups with members already populated
+      const groupsWithWallets = (groups || []).map((group: any) => ({
         ...group,
-        wallets: [] as UserWallet[]
+        wallets: group.wallets || [] as UserWallet[]
       }));
       
-      setWalletGroups(groups);
-      
-      // Fetch wallet members for each group
-      for (const group of groups) {
-        try {
-          const { data: membersData, error: membersError } = await supabase
-            .from('wallet_group_members')
-            .select(`
-              id,
-              group_id,
-              wallet_id,
-              wallet:user_wallets (*)
-            `)
-            .eq('group_id', group.id);
-          
-          if (!membersError && membersData) {
-            console.log(`Found ${membersData.length} wallets for group ${group.id}`);
-            // Update group with its wallets
-            const wallets = membersData.map(member => {
-              // First convert to unknown, then to UserWallet to avoid type error
-              const wallet = member.wallet as unknown as UserWallet;
-              return wallet;
-            });
-            
-            setWalletGroups(prev => 
-              prev.map(g => 
-                g.id === group.id ? { ...g, wallets } : g
-              )
-            );
-          }
-        } catch (err) {
-          console.error(`Error fetching members for group ${group.id}:`, err);
-        }
-      }
-      
+      setWalletGroups(groupsWithWallets);
       setIsLoadingGroups(false);
     } catch (error) {
       console.error('Error in fetchWalletGroups:', error);
@@ -509,9 +470,8 @@ const TransferForm = () => {
       // from the JWT, so even if user.id is missing here, the transaction is
       // still correctly associated with the logged-in user (not the wallet).
       try {
-        // Get the Supabase session's access_token
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+        // Get the auth token
+        const token = getToken();
 
         await createTransaction({
           wallet_address: account || '',
@@ -567,8 +527,7 @@ const TransferForm = () => {
       toast.info(`Transaction submitted: ${tx.hash}`);
 
       // Get session token for Worker calls
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
+      const token = getToken();
 
       // Fetch the most recent pending transaction via the Worker
       // (Worker scopes by user_id from JWT, not wallet_address)
@@ -623,15 +582,12 @@ const TransferForm = () => {
       } catch (error: any) {
         console.error('Error waiting for transaction receipt:', error);
         
-        // Update transaction to failed
+        // Update transaction to failed via Worker
         if (recentTx && recentTx.length > 0) {
-          await supabase
-            .from('transactions')
-            .update({
-              status: 'failed',
-              error: error.message || 'Error waiting for receipt'
-            })
-            .eq('id', recentTx[0].id);
+          await updateTransaction(recentTx[0].id, {
+            status: 'failed',
+            error: error.message || 'Error waiting for receipt'
+          }, token);
         }
           
         throw new Error('Transaction failed: ' + (error.message || 'Error waiting for receipt'));
@@ -646,8 +602,7 @@ const TransferForm = () => {
       
       // Log failed transaction via Worker (user_id is forced from JWT)
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+        const token = getToken();
 
         // Fetch the user's most recent transaction via the Worker
         const { data: recentTxs } = await getTransactionHistory(token);

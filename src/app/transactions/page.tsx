@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import Header from '@/components/Header';
 import { useWeb3 } from '@/context/Web3Context';
-import { supabase } from '@/utils/supabaseClient';
 import { getTransactionHistory, updateTransaction, deleteTransaction as deleteTransactionViaWorker, type Transaction } from '@/utils/workerClient';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';

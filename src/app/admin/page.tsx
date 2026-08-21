@@ -5,7 +5,6 @@ import Header from '@/components/Header';
 import { useWeb3 } from '@/context/Web3Context';
 import { useAuth } from '@/context/AuthContext';
 import { ethers } from 'ethers';
-import { supabase } from '@/utils/supabaseClient';
 import { toast } from 'react-toastify';
 import Link from 'next/link';
 import MainContractABI from '@/utils/MainContractABI.json';
@@ -327,12 +326,6 @@ export default function AdminPage() {
       
       // Wait for transaction to be mined
       await tx.wait();
-      
-      // Update Supabase contract owner
-      await supabase
-        .from('contracts')
-        .update({ owner: newOwnerAddress.toLowerCase() })
-        .eq('address', contractAddress);
         
       setNewOwnerAddress('');
       

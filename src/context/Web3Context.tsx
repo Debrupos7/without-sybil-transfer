@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ethers } from 'ethers';
-import { supabase } from '@/utils/supabaseClient';
 import {
   getUserNetworks,
   getUserContracts,
@@ -109,13 +108,11 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       try {
         // Load networks from the Worker (default + user networks, organized
         // by mainnet/testnet). Worker requires auth — fetch the session token.
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-        if (!token) {
+        if (!accessToken) {
           console.warn('No session token; cannot load networks from Worker');
           return;
         }
-        const { data, error } = await getNetworks(token);
+        const { data, error } = await getNetworks(accessToken);
         if (error || !data) {
           console.error('Failed to load networks from Worker:', error);
           return;

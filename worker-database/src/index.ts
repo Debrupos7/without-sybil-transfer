@@ -27,7 +27,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
 import {
-  verifySupabaseJwt,
+  verifyJwt,
   extractBearer,
   AuthError,
   type AuthenticatedUser,
@@ -49,21 +49,19 @@ import { walletsRoute } from "./routes/wallets";
 import { walletGroupsRoute } from "./routes/wallet-groups";
 import { historyRoute } from "./routes/history";
 import { cleanupRoute } from "./routes/cleanup";
+import { authRoute } from "./routes/auth";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 export type Env = {
   DB: D1Database;
-  // Supabase JWT verification
-  SUPABASE_JWT_SECRET: string;
-  SUPABASE_JWKS_URI?: string;
-  SUPABASE_URL?: string;
-  SUPABASE_SERVICE_ROLE_KEY?: string; // for migration script only; not used by worker
+  // JWT
+  JWT_SECRET: string;
   // CORS
   ALLOWED_ORIGINS: string; // comma-separated list of frontend origins
   // Admin
-  ADMIN_USER_IDS?: string; // comma-separated supabase user ids allowed to call /cleanup
+  ADMIN_USER_IDS?: string; // comma-separated user ids allowed to call /cleanup
   CLEANUP_API_KEY?: string; // legacy bearer for cron-triggered cleanup
   // Misc
   ENVIRONMENT: string; // "production" | "preview" | "development"
@@ -115,21 +113,25 @@ app.use(
 
 // 4. Auth + audit middleware — applies to all routes below this point.
 app.use("*", async (c, next) => {
-  // Skip auth for health check (registered below) and CORS preflight.
-  if (c.req.path === "/healthz" || c.req.method === "OPTIONS") {
+  // Skip auth for health check, CORS preflight, and public auth routes (POST only).
+  // GET /auth/me requires auth.
+  const isPublicAuth = c.req.path.startsWith("/auth/") && c.req.method === "POST";
+  if (c.req.path === "/healthz" || c.req.method === "OPTIONS" || isPublicAuth) {
     return next();
   }
   return authAndRateLimit(c, next);
 });
 
 app.use("*", async (c, next) => {
-  if (c.req.path === "/healthz" || c.req.method === "OPTIONS") {
+  const isPublicAuth = c.req.path.startsWith("/auth/") && c.req.method === "POST";
+  if (c.req.path === "/healthz" || c.req.method === "OPTIONS" || isPublicAuth) {
     return next();
   }
   return auditMiddleware(c, next);
 });
 
 // 5. Authenticated routes
+app.route("/auth", authRoute);
 app.route("/transactions", transactionsRoute);
 app.route("/networks", networksRoute);
 app.route("/user-networks", userNetworksRoute);
@@ -145,6 +147,12 @@ app.route("/cleanup-transactions", cleanupRoute);
 app.get("/healthz", (c) =>
   c.json({ ok: true, ts: nowIso(), env: c.env.ENVIRONMENT })
 );
+
+// 7. Authenticated /auth/me — goes through auth middleware
+app.get("/auth/me", (c) => {
+  const user = c.get("user");
+  return c.json({ user: { id: user.sub, email: user.email } });
+});
 
 // 7. 404 + global error handler
 app.notFound((c) =>
@@ -186,10 +194,7 @@ async function authAndRateLimit(c: C, next: () => Promise<void>) {
 
   let user: AuthenticatedUser;
   try {
-    user = await verifySupabaseJwt(token, {
-      jwtSecret: c.env.SUPABASE_JWT_SECRET,
-      jwksUri: c.env.SUPABASE_JWKS_URI,
-    });
+    user = await verifyJwt(token, c.env.JWT_SECRET);
   } catch (e) {
     const err = e as AuthError;
     return c.json(

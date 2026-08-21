@@ -5,16 +5,15 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useWeb3 } from '@/context/Web3Context';
 import { toast } from 'react-toastify';
-import { supabase } from '@/utils/supabaseClient';
+import { getToken } from '@/utils/authClient';
 import {
   getWallets,
   upsertWallet,
   deleteWallet as deleteWalletViaWorker,
   getWalletGroups,
   createWalletGroup,
+  updateWalletGroup,
   deleteWalletGroup as deleteWalletGroupViaWorker,
-  workerPost,
-  workerDelete,
 } from '@/utils/workerClient';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -77,8 +76,7 @@ const WalletsPage = () => {
   const fetchWallets = async () => {
     try {
       setIsLoading(true);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
+      const token = getToken();
 
       const { data, error } = await getWallets(token);
       if (error) throw error;
@@ -99,8 +97,7 @@ const WalletsPage = () => {
   const fetchWalletGroups = async () => {
     try {
       setIsLoading(true);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
+      const token = getToken();
 
       const { data: groups, error } = await getWalletGroups(token);
       if (error) {
@@ -134,8 +131,7 @@ const WalletsPage = () => {
 
       // Normalize the address to lowercase
       const normalizedAddress = walletForm.address.toLowerCase();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
+      const token = getToken();
 
       // Upsert handles both create and update — Worker dedups on (user_id, address).
       // The Worker forces user_id from the JWT, so we don't pass it.
@@ -169,93 +165,24 @@ const WalletsPage = () => {
     }
 
     try {
-      // Skip checking if the table exists since we've already initialized it
-      // Just proceed with creating/updating the group directly
-      let groupId = editingGroupId;
+      const token = getToken();
 
       if (editingGroupId) {
         // Update existing group
-        console.log('Updating wallet group:', editingGroupId);
-        const { error } = await supabase
-          .from('wallet_groups')
-          .update({ name: groupForm.name })
-          .eq('id', editingGroupId);
+        const { error } = await updateWalletGroup(editingGroupId, {
+          name: groupForm.name,
+          wallet_ids: groupForm.selectedWallets,
+        }, token);
 
-        if (error) {
-          console.error('Error updating wallet group:', error);
-          
-          // Check if the error is because the table doesn't exist
-          if (error.code === '42P01') {
-            toast.error('Wallet groups table does not exist. Try initializing the feature first.');
-            return;
-          }
-          
-          throw new Error(error.message || 'Failed to update wallet group');
-        }
+        if (error) throw error;
       } else {
         // Create new group
-        console.log('Creating new wallet group:', { 
-          user_id: user?.id, 
-          name: groupForm.name 
-        });
-        
-        const { data, error } = await supabase
-          .from('wallet_groups')
-          .insert({
-            user_id: user?.id,
-            name: groupForm.name
-          })
-          .select('id')
-          .single();
+        const { error } = await createWalletGroup({
+          name: groupForm.name,
+          wallet_ids: groupForm.selectedWallets,
+        }, token);
 
-        if (error) {
-          console.error('Error creating wallet group:', error);
-          
-          // Check if the error is because the table doesn't exist
-          if (error.code === '42P01') {
-            toast.error('Wallet groups table does not exist. Try initializing the feature first.');
-            return;
-          }
-          
-          throw new Error(error.message || 'Failed to create wallet group');
-        }
-        
-        if (!data || !data.id) {
-          throw new Error('Failed to get ID of the newly created wallet group');
-        }
-        
-        groupId = data.id;
-        console.log('New wallet group created with ID:', groupId);
-      }
-
-      // If editing, remove all existing members first
-      if (editingGroupId) {
-        const { error } = await supabase
-          .from('wallet_group_members')
-          .delete()
-          .eq('group_id', editingGroupId);
-
-        if (error) {
-          console.error('Error deleting existing group members:', error);
-          throw new Error(error.message || 'Failed to update group members');
-        }
-      }
-
-      // Add all selected wallets as members
-      const members = groupForm.selectedWallets.map(walletId => ({
-        group_id: groupId,
-        wallet_id: walletId
-      }));
-
-      console.log('Adding wallet group members:', members);
-      
-      const { error } = await supabase
-        .from('wallet_group_members')
-        .insert(members);
-
-      if (error) {
-        console.error('Error adding wallet group members:', error);
-        throw new Error(error.message || 'Failed to add wallets to group');
+        if (error) throw error;
       }
 
       toast.success(`Wallet group ${editingGroupId ? 'updated' : 'created'} successfully`);
@@ -275,8 +202,7 @@ const WalletsPage = () => {
   const handleDeleteWallet = async (id: string) => {
     if (confirm('Are you sure you want to delete this wallet?')) {
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+        const token = getToken();
         const { error } = await deleteWalletViaWorker(id, token);
 
         if (error) throw error;
@@ -294,8 +220,7 @@ const WalletsPage = () => {
   const handleDeleteGroup = async (id: string) => {
     if (confirm('Are you sure you want to delete this wallet group?')) {
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+        const token = getToken();
 
         // Worker cascades the member deletion automatically on group delete
         const { error } = await deleteWalletGroupViaWorker(id, token);
@@ -425,131 +350,14 @@ const WalletsPage = () => {
     );
   };
 
-  // Add this function to create the necessary tables if they don't exist
+  // Table creation is handled by the Worker via migrations.
+  // This function simply fetches wallet groups to verify access.
   const createWalletGroupTables = async () => {
     try {
-      console.log('Creating wallet group tables...');
-      
-      // Try to create wallet_groups table first by attempting an operation
-      const createGroupsTable = async () => {
-        console.log('Attempting to create wallet_groups table...');
-        
-        try {
-          // First check if wallet_groups exists using a special query
-          const { data: groupsExist, error: groupsCheckError } = await supabase
-            .from('information_schema.tables')
-            .select('table_name')
-            .eq('table_schema', 'public')
-            .eq('table_name', 'wallet_groups')
-            .single();
-            
-          if (groupsCheckError || !groupsExist) {
-            console.log('wallet_groups table does not exist, attempting to create it');
-            
-            // Try to insert to create the table with minimal fields
-            const { error: createError } = await supabase.rpc('create_wallet_groups_table');
-            
-            if (createError) {
-              // If RPC fails, try direct insert to see if table already exists
-              console.log('RPC failed, trying direct insert to see if table exists');
-              const { error: insertError } = await supabase
-                .from('wallet_groups')
-                .insert({
-                  user_id: user?.id,
-                  name: 'Test Group'
-                });
-                
-              if (insertError) {
-                if (insertError.code === '42P01') {
-                  console.error('Cannot create wallet_groups table, insufficient permissions');
-                  return false;
-                } else {
-                  console.error('Error accessing wallet_groups table:', insertError);
-                }
-              } else {
-                // Table exists and we created a test group
-                console.log('Successfully created test group in wallet_groups');
-                
-                // Delete the test group
-                await supabase
-                  .from('wallet_groups')
-                  .delete()
-                  .eq('name', 'Test Group');
-              }
-            } else {
-              console.log('Successfully created wallet_groups table via RPC');
-            }
-          } else {
-            console.log('wallet_groups table already exists');
-          }
-          
-          return true;
-        } catch (err) {
-          console.error('Error creating wallet_groups table:', err);
-          return false;
-        }
-      };
-      
-      const createMembersTable = async () => {
-        console.log('Attempting to create wallet_group_members table...');
-        
-        try {
-          // First check if wallet_group_members exists
-          const { data: membersExist, error: membersCheckError } = await supabase
-            .from('information_schema.tables')
-            .select('table_name')
-            .eq('table_schema', 'public')
-            .eq('table_name', 'wallet_group_members')
-            .single();
-            
-          if (membersCheckError || !membersExist) {
-            console.log('wallet_group_members table does not exist, attempting to create it');
-            
-            // Try to create via RPC
-            const { error: createError } = await supabase.rpc('create_wallet_group_members_table');
-            
-            if (createError) {
-              // Try to see if table exists with a select
-              console.log('RPC failed, trying direct select to see if table exists');
-              const { error: selectError } = await supabase
-                .from('wallet_group_members')
-                .select('id')
-                .limit(1);
-                
-              if (selectError && selectError.code === '42P01') {
-                console.error('Cannot create wallet_group_members table, insufficient permissions');
-                return false;
-              }
-            } else {
-              console.log('Successfully created wallet_group_members table via RPC');
-            }
-          } else {
-            console.log('wallet_group_members table already exists');
-          }
-          
-          return true;
-        } catch (err) {
-          console.error('Error creating wallet_group_members table:', err);
-          return false;
-        }
-      };
-      
-      // Try to create both tables
-      const groupsSuccess = await createGroupsTable();
-      if (!groupsSuccess) {
-        return false;
-      }
-      
-      const membersSuccess = await createMembersTable();
-      if (!membersSuccess) {
-      }
-      
-      // Fetch wallet groups after setup
-      fetchWalletGroups();
-      
+      await fetchWalletGroups();
       return true;
     } catch (error) {
-      console.error('Error setting up wallet group tables:', error);
+      console.error('Error accessing wallet groups:', error);
       return false;
     }
   };

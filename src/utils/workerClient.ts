@@ -28,6 +28,12 @@
 
 const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || "";
 
+// Get JWT from localStorage (set by authClient.ts)
+function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("sybil_transfer_token");
+}
+
 if (!WORKER_URL && typeof window !== "undefined") {
   console.warn(
     "NEXT_PUBLIC_WORKER_URL is not set. Worker API calls will fail.\n" +
@@ -115,7 +121,8 @@ async function workerFetch<T = any>(
   accessToken: string | null | undefined,
   init: RequestInit = {}
 ): Promise<{ data: T | null; error: Error | null; status: number }> {
-  if (!accessToken) {
+  const token = accessToken || getStoredToken();
+  if (!token) {
     return { data: null, error: new Error("No access token"), status: 401 };
   }
   if (!WORKER_URL) {
@@ -130,7 +137,7 @@ async function workerFetch<T = any>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${token}`,
         ...(init.headers || {}),
       },
     });
@@ -331,6 +338,14 @@ export async function createWalletGroup(
 
 export async function deleteWalletGroup(id: string, token?: string | null) {
   return workerDelete<{ deleted: boolean; id: string }>(`/wallet-groups/${id}`, token);
+}
+
+export async function updateWalletGroup(
+  id: string,
+  body: { name: string; wallet_ids?: string[] },
+  token?: string | null
+) {
+  return workerPut<{ group: WalletGroup }>(`/wallet-groups/${id}`, body, token);
 }
 
 // Networks (default + user, organized by mainnet/testnet)
