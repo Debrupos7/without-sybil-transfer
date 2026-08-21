@@ -2,7 +2,6 @@
   command = "npm run build"
   publish = ".next"
   base = "."
-  ignore = ["worker-database/**"]
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
