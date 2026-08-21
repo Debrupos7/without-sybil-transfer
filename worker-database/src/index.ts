@@ -148,12 +148,6 @@ app.get("/healthz", (c) =>
   c.json({ ok: true, ts: nowIso(), env: c.env.ENVIRONMENT })
 );
 
-// 7. Authenticated /auth/me — goes through auth middleware
-app.get("/auth/me", (c) => {
-  const user = c.get("user");
-  return c.json({ user: { id: user.sub, email: user.email } });
-});
-
 // 7. 404 + global error handler
 app.notFound((c) =>
   c.json({ error: "not_found", message: "Route not found" }, 404)

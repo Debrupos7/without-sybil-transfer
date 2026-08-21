@@ -16,7 +16,7 @@ database_id = "ad53ab51-d14a-4485-a581-d0e37d68c51d"
 # ---------------------------------------------------------------------------
 [vars]
 ENVIRONMENT = "production"
-ALLOWED_ORIGINS = "https://sybil-transfer.netlify.app,http://localhost:3000"
+ALLOWED_ORIGINS = "https://fundsflow.netlify.app,https://sybil-transfer.netlify.app,http://localhost:3000"
 ADMIN_USER_IDS = ""
 
 # ---------------------------------------------------------------------------

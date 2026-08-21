@@ -157,18 +157,12 @@ authRoute.post("/sign-in", async (c) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// GET /auth/me — Get current user from JWT (requires auth middleware)
-// ---------------------------------------------------------------------------
-authRoute.get("/me", async (c) => {
-  // This endpoint is called AFTER the auth middleware runs.
-  // The auth middleware sets c.get("user") if the token is valid.
-  // But /auth/* routes skip auth middleware, so we need to handle it here.
-  // Actually, /auth/me should go through the auth middleware.
-  // We'll register it separately in index.ts.
-
-  // This handler won't be reached because /auth/me is registered at the top level.
-  return c.json({ error: "not_reached" }, 500);
+authRoute.get("/me", (c) => {
+  const user = c.get("user" as any) as { sub: string; email: string } | undefined;
+  if (!user) {
+    return c.json({ error: "unauthorized", message: "Not authenticated" }, 401);
+  }
+  return c.json({ user: { id: user.sub, email: user.email } });
 });
 
 export { authRoute };
