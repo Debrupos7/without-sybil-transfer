@@ -1,0 +1,51 @@
+functionsDirectory = "C:\\Users\\akasa\\Projects\\without-sybil-transfer\\without-sybil-transfer\\netlify\\functions"
+functionsDirectoryOrigin = "config"
+redirectsOrigin = "config"
+headers = []
+
+[build]
+publish = "C:\\Users\\akasa\\Projects\\without-sybil-transfer\\without-sybil-transfer\\.next"
+publishOrigin = "config"
+commandOrigin = "config"
+command = "npm run build"
+base = "C:\\Users\\akasa\\Projects\\without-sybil-transfer\\without-sybil-transfer"
+functions = "C:\\Users\\akasa\\Projects\\without-sybil-transfer\\without-sybil-transfer\\netlify\\functions"
+
+[build.environment]
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[functions]
+
+[functions.scheduled-cleanup]
+schedule = "@daily"
+
+[functions."*"]
+
+[[plugins]]
+origin = "config"
+package = "@netlify/plugin-nextjs"
+
+[plugins.inputs]
+
+[[redirects]]
+from = "/api/cleanup-transactions"
+to = "/.netlify/functions/cleanup-transactions"
+status = 200.0
+force = true
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]
