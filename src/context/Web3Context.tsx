@@ -10,12 +10,12 @@ import {
   updateUserNetwork,
   deleteUserNetwork,
   createUserContract,
-  updateUserContract,
   deleteUserContract,
   upsertWallet,
   getNetworks,
   workerPost,
   workerGet,
+  workerPut,
   workerDelete,
 } from '@/utils/workerClient';
 import MainContractABI from '@/utils/MainContractABI.json';
@@ -44,8 +44,8 @@ type Web3ContextType = {
   };
   userNetworks: NetworkInfo[];
   userContracts: UserContract[];
-  addNetwork: (network: Omit<NetworkInfo, 'id'>) => Promise<void>;
-  editNetwork: (id: string, network: Partial<NetworkInfo>) => Promise<void>;
+  addNetwork: (network: Omit<NetworkInfo, 'id'>) => Promise<any>;
+  editNetwork: (id: string, network: Partial<NetworkInfo>) => Promise<any>;
   deleteNetwork: (id: string) => Promise<void>;
   addContract: (contract: Omit<UserContract, 'id'>) => Promise<void>;
   editContract: (id: string, contract: Partial<UserContract>) => Promise<void>;
@@ -120,12 +120,12 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
           console.error('Failed to load networks from Worker:', error);
           return;
         }
-        setAvailableNetworks(data);
+        setAvailableNetworks(data as any);
 
         // Set default network
         if (data.mainnet && Object.keys(data.mainnet).length > 0) {
           const firstNetwork = Object.keys(data.mainnet)[0];
-          setSelectedNetwork(data.mainnet[firstNetwork]);
+          setSelectedNetwork(data.mainnet[firstNetwork] as NetworkInfo);
         }
       } catch (error) {
         console.error('Failed to load network configurations:', error);
@@ -315,15 +315,15 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
 
     if (error) throw error;
 
+    const networkData = data!.network;
     const mappedNetwork = {
-      ...data,
-      id: data!.id,
-      name: data!.name,
-      chainId: data!.chain_id,
-      rpcUrl: data!.rpc_url,
-      currencySymbol: data!.currency_symbol,
-      explorerUrl: data!.explorer_url,
-      isTestnet: Boolean(data!.is_testnet)
+      id: networkData.id,
+      name: networkData.name,
+      chainId: networkData.chain_id,
+      rpcUrl: networkData.rpc_url,
+      currencySymbol: networkData.currency_symbol,
+      explorerUrl: networkData.explorer_url,
+      isTestnet: Boolean(networkData.is_testnet)
     };
 
     // Update local state
@@ -355,15 +355,15 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (error) throw error;
 
     // Manually map the returned data to ensure isTestnet is properly set
+    const networkData = data!.network;
     const mappedNetwork = {
-      ...data,
-      id: data!.id,
-      name: data!.name,
-      chainId: data!.chain_id,
-      rpcUrl: data!.rpc_url,
-      currencySymbol: data!.currency_symbol,
-      explorerUrl: data!.explorer_url,
-      isTestnet: Boolean(data!.is_testnet)
+      id: networkData.id,
+      name: networkData.name,
+      chainId: networkData.chain_id,
+      rpcUrl: networkData.rpc_url,
+      currencySymbol: networkData.currency_symbol,
+      explorerUrl: networkData.explorer_url,
+      isTestnet: Boolean(networkData.is_testnet)
     };
 
     // Update local state

@@ -515,7 +515,7 @@ const TransferForm = () => {
 
         await createTransaction({
           wallet_address: account || '',
-          network_id: selectedNetwork.id,
+          network_id: selectedNetwork.id || '',
           contract_id: selectedContractId,
           tx_hash: '', // Will be filled after sending
           status: 'pending',
