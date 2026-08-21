@@ -24,7 +24,7 @@ type Wallet = {
   id: string;
   address: string;
   name: string | null;
-  last_connected: string;
+  last_connected: string | null;
 };
 
 type WalletGroup = {
@@ -667,7 +667,7 @@ const WalletsPage = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm text-gray-500">
-                              {new Date(wallet.last_connected).toLocaleString()}
+                              {wallet.last_connected ? new Date(wallet.last_connected).toLocaleString() : 'Never'}
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
