@@ -113,18 +113,21 @@ app.use(
 
 // 4. Auth + audit middleware — applies to all routes below this point.
 app.use("*", async (c, next) => {
+  // Normalize path (handle double slashes from trailing-slash env vars)
+  const path = c.req.path.replace(/\/+/g, "/");
   // Skip auth for health check, CORS preflight, and public auth routes (POST only).
   // GET /auth/me requires auth.
-  const isPublicAuth = c.req.path.startsWith("/auth/") && c.req.method === "POST";
-  if (c.req.path === "/healthz" || c.req.method === "OPTIONS" || isPublicAuth) {
+  const isPublicAuth = path.startsWith("/auth/") && c.req.method === "POST";
+  if (path === "/healthz" || c.req.method === "OPTIONS" || isPublicAuth) {
     return next();
   }
   return authAndRateLimit(c, next);
 });
 
 app.use("*", async (c, next) => {
-  const isPublicAuth = c.req.path.startsWith("/auth/") && c.req.method === "POST";
-  if (c.req.path === "/healthz" || c.req.method === "OPTIONS" || isPublicAuth) {
+  const path = c.req.path.replace(/\/+/g, "/");
+  const isPublicAuth = path.startsWith("/auth/") && c.req.method === "POST";
+  if (path === "/healthz" || c.req.method === "OPTIONS" || isPublicAuth) {
     return next();
   }
   return auditMiddleware(c, next);

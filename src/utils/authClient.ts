@@ -7,7 +7,7 @@
 
 "use client";
 
-const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || "";
+const WORKER_URL = (process.env.NEXT_PUBLIC_WORKER_URL || "").replace(/\/+$/, "");
 
 export type AuthUser = {
   id: string;

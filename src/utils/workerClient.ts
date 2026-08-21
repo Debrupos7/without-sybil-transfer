@@ -26,7 +26,7 @@
 
 "use client";
 
-const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || "";
+const WORKER_URL = (process.env.NEXT_PUBLIC_WORKER_URL || "").replace(/\/+$/, "");
 
 // Get JWT from localStorage (set by authClient.ts)
 function getStoredToken(): string | null {
