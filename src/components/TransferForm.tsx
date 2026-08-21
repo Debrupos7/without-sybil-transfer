@@ -660,7 +660,7 @@ const TransferForm = () => {
           // This is a new error, not related to our most recent transaction
           await createTransaction({
             wallet_address: account || '',
-            network_id: selectedNetwork.id,
+          network_id: selectedNetwork.id || '',
             contract_id: selectedContractId,
             tx_hash: '',
             status: 'failed',
