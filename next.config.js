@@ -1,34 +1,23 @@
-// ============================================================================
-// next.config.js — Next.js config with top-level security hardening
-// ----------------------------------------------------------------------------
-// Adds:
-//   * Strict Content-Security-Policy (no inline scripts except where needed for hydration)
-//   * X-Frame-Options: DENY (no clickjacking)
-//   * Strict-Transport-Security with preload
-//   * Referrer-Policy: strict-origin-when-cross-origin
-//   * X-Content-Type-Options: nosniff
-//   * Permissions-Policy locked down
-//   * Cross-Origin-Opener-Policy: same-origin
-//   * Cross-Origin-Resource-Policy: same-origin
-//   * Removes X-Powered-By header
-//
-// UPDATE the `connect-src` line below to include your actual deployed
-// Worker URL and Supabase URL. The placeholder
-// `https://sybil-transfer-worker.<your-subdomain>.workers.dev` MUST be
-// replaced before going to production.
-// ============================================================================
-
 /** @type {import('next').NextConfig} */
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const workerUrl = process.env.NEXT_PUBLIC_WORKER_URL || '';
+
 const securityConfig = {
   reactStrictMode: true,
-  poweredByHeader: false,   // removes X-Powered-By: Next.js
+  poweredByHeader: false,
 
   async headers() {
+    const connectSrc = [
+      "'self'",
+      "https://*.supabase.co",
+      supabaseUrl,
+      workerUrl,
+    ].filter(Boolean).join(' ');
+
     return [
       {
         source: "/(.*)",
         headers: [
-          // Content Security Policy — adjust connect-src to your real Worker URL
           {
             key: "Content-Security-Policy",
             value: [
@@ -37,7 +26,7 @@ const securityConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https:",
               "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co https://sybil-transfer-worker.<your-subdomain>.workers.dev",
+              `connect-src 'self' ${connectSrc}`,
               "frame-ancestors 'none'",
               "base-uri 'none'",
               "form-action 'self'",
