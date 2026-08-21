@@ -624,34 +624,6 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
         MainContractABI,
         provider
       );
-        
-        // Check if current account is owner
-        try {
-          const ownerAddress = await contract.owner();
-          const currentIsOwner = ownerAddress.toLowerCase() === account.toLowerCase();
-          setIsOwner(currentIsOwner);
-        } catch (error) {
-          console.error('Error checking owner:', error);
-          setIsOwner(false);
-        }
-
-        // Check if current account is whitelisted
-        try {
-          const currentIsWhitelisted = await contract.isWhitelisted(account);
-          setIsWhitelisted(currentIsWhitelisted);
-        } catch (error) {
-          console.error('Error checking whitelist:', error);
-          setIsWhitelisted(false);
-        }
-        
-        return;
-      }
-
-      const contract = new ethers.Contract(
-        contractData.address,
-        MainContractABI,
-        provider
-      );
 
       // Check if current account is owner
       try {
