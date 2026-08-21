@@ -1,6 +1,8 @@
 [build]
   command = "npm run build"
   publish = ".next"
+  base = "."
+  ignore = ["worker-database/**"]
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -11,10 +13,6 @@
   to = "/.netlify/functions/cleanup-transactions"
   status = 200
   force = true
-
-# Add environment variables for Netlify
-[build.environment]
-  NETLIFY_NEXT_PLUGIN_SKIP = "true"
 
 # Functions configuration
 [functions]
