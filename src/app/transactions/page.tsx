@@ -558,7 +558,7 @@ export default function TransactionsPage() {
                               <span className="font-medium">Transfer:</span> {tx.amount} {tx.currencySymbol || ''}
                             </p>
                             <p className="text-gray-600 text-xs">
-                              <span className="font-medium">Gas Cost:</span> {formatGasCost(tx.gas_cost)} {tx.currencySymbol || ''}
+                              <span className="font-medium">Gas Cost:</span> {formatGasCost(tx.gas_cost ?? undefined)} {tx.currencySymbol || ''}
                             </p>
                             <p className="text-gray-800 text-sm font-semibold">
                               <span className="font-medium">Total:</span> {calculateTotalAmount(tx)} {tx.currencySymbol || ''}
@@ -678,7 +678,7 @@ export default function TransactionsPage() {
                                     </p>
                                     <p className="text-gray-700 flex flex-col sm:flex-row sm:justify-between gap-1">
                                       <span className="font-medium">Gas Cost:</span>
-                                      <span>{formatGasCost(tx.gas_cost)} {tx.currencySymbol || ''}</span>
+                                      <span>{formatGasCost(tx.gas_cost ?? undefined)} {tx.currencySymbol || ''}</span>
                                     </p>
                                     <p className="text-gray-700 flex flex-col sm:flex-row sm:justify-between gap-1 font-medium">
                                       <span>Total:</span>
