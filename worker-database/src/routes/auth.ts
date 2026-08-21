@@ -57,11 +57,31 @@ authRoute.post("/sign-up", async (c) => {
   const emailLower = email.toLowerCase().trim();
 
   // Check if user already exists
-  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
+  const existing = await c.env.DB.prepare("SELECT id, password_hash FROM users WHERE email = ?")
     .bind(emailLower)
-    .first<{ id: string }>();
+    .first<{ id: string; password_hash: string | null }>();
 
   if (existing) {
+    // Migrated users from Supabase have no password_hash — let them claim their account
+    if (!existing.password_hash) {
+      const passwordHash = await hashPassword(password);
+      const now = nowIso();
+      await c.env.DB.prepare(
+        `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(passwordHash, now, existing.id)
+        .run();
+
+      const token = await signJwt(
+        { sub: existing.id, email: emailLower, emailVerified: true },
+        c.env.JWT_SECRET
+      );
+      return c.json({
+        token,
+        user: { id: existing.id, email: emailLower },
+      }, 200);
+    }
+
     return c.json(
       { error: "conflict", message: "An account with this email already exists" },
       409
@@ -124,10 +144,18 @@ authRoute.post("/sign-in", async (c) => {
     .bind(emailLower)
     .first<{ id: string; email: string; password_hash: string }>();
 
-  if (!user || !user.password_hash) {
+  if (!user) {
     return c.json(
       { error: "invalid_credentials", message: "Invalid email or password" },
       401
+    );
+  }
+
+  // Migrated users from Supabase have no password_hash yet
+  if (!user.password_hash) {
+    return c.json(
+      { error: "needs_password", message: "This account needs a password. Please sign up with your email and a new password to activate your account." },
+      400
     );
   }
 

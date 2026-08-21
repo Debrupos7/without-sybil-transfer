@@ -40,7 +40,12 @@ export default function SignIn() {
       router.push('/dashboard');
     } catch (error: any) {
       console.error('Sign in error:', error);
-      toast.error(error.message || 'Failed to sign in');
+      if (error.message?.includes('needs a password')) {
+        toast.info('This account was migrated. Please sign up with your email and a new password to activate it.');
+        router.push('/sign-up');
+      } else {
+        toast.error(error.message || 'Failed to sign in');
+      }
     } finally {
       setIsLoading(false);
     }
