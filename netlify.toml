@@ -1,0 +1,24 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Redirect /api/cleanup-transactions to Netlify Function
+[[redirects]]
+  from = "/api/cleanup-transactions"
+  to = "/.netlify/functions/cleanup-transactions"
+  status = 200
+  force = true
+
+# Add environment variables for Netlify
+[build.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
+
+# Functions configuration
+[functions]
+  directory = "netlify/functions"
+
+  [functions.scheduled-cleanup]
+    schedule = "@daily" # Runs once per day at midnight 

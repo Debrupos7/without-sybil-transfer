@@ -1,0 +1,66 @@
+{
+  "mainnet": {
+    "ethereum": {
+      "name": "Ethereum Mainnet",
+      "rpc_url": "https://mainnet.infura.io/v3/YOUR_INFURA_KEY",
+      "chain_id": 1,
+      "currency_symbol": "ETH",
+      "explorer_url": "https://etherscan.io/tx/"
+    },
+    "base": {
+      "name": "Base",
+      "rpc_url": "https://mainnet.base.org",
+      "chain_id": 8453,
+      "currency_symbol": "ETH",
+      "explorer_url": "https://basescan.org/tx/"
+    },
+
+    
+    "gravity_alpha_network": {
+      "name": "Gravity Alpha Mainnet",
+      "rpc_url": "https://rpc.gravity.xyz",
+      "chain_id": 1625,
+      "currency_symbol": "G",
+      "explorer_url": "https://explorer.gravity.xyz//tx/"
+    },
+
+
+    "linea": {
+      "name": "Linea",
+      "rpc_url": "https://rpc.linea.build",
+      "chain_id": 59144,
+      "currency_symbol": "ETH",
+      "explorer_url": "https://lineascan.build/tx/"
+    }
+  },
+  "testnet": {
+    "sepolia": {
+      "name": "Sepolia Testnet",
+      "rpc_url": "https://sepolia.infura.io/v3/YOUR_INFURA_KEY",
+      "chain_id": 11155111,
+      "currency_symbol": "ETH",
+      "explorer_url": "https://sepolia.etherscan.io/tx/"
+    },
+    "base_sepolia": {
+      "name": "Base Sepolia Testnet",
+      "rpc_url": "https://sepolia.base.org",
+      "chain_id": 84532,
+      "currency_symbol": "ETH",
+      "explorer_url": "https://sepolia.basescan.org/tx/"
+    },
+    "linea_sepolia": {
+      "name": "Linea Sepolia Testnet",
+      "rpc_url": "https://rpc.sepolia.linea.build",
+      "chain_id": 59141,
+      "currency_symbol": "ETH",
+      "explorer_url": "https://sepolia.lineascan.build/tx/"
+    },
+    "monad_testnet": {
+      "name": "Monad Testnet",
+      "rpc_url": "https://monad-testnet.g.alchemy.com/v2/wuUYGZCyzKZXftsLQ51CcyKshjUq61na",
+      "chain_id": 10143,
+      "currency_symbol": "MON",
+      "explorer_url": "https://testnet.monadexplorer.com/tx/"
+    }
+  }
+} 

@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Local dev secrets for the Cloudflare Worker.
+# Copy this file to `.dev.vars` and fill in the values. NEVER commit `.dev.vars`.
+# ---------------------------------------------------------------------------
+
+# Supabase project's JWT secret — find in:
+# Supabase Dashboard -> Project Settings -> API -> JWT Secret
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret-here
+
+# Optional: RS256 JWKS URI for fallback verification (leave blank if using HS256)
+SUPABASE_JWKS_URI=
+
+# Comma-separated origins allowed to call this worker (CORS)
+ALLOWED_ORIGINS=http://localhost:3000
+
+# Comma-separated Supabase user ids that can call /cleanup-transactions
+ADMIN_USER_IDS=
+
+# Legacy bearer for cron-triggered cleanup (generate with: openssl rand -hex 32)
+CLEANUP_API_KEY=
+
+# Environment flag
+ENVIRONMENT=development
+
+# ---------------------------------------------------------------------------
+# Variables used ONLY by scripts/migrate-supabase-to-d1.mjs — never read by
+# the worker itself. Keep these here only if you run the migration script
+# locally via `npm run migrate-from-supabase`.
+# ---------------------------------------------------------------------------
+SUPABASE_URL=https://YOUR-PROJECT-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_xxx_your_service_role_key
+
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
+CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
+D1_DATABASE_ID=your_d1_database_id
+D1_DATABASE_NAME=sybil-transfer-db

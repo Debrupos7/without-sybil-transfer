@@ -1,0 +1,59 @@
+name = "sybil-transfer-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# D1 binding
+# ---------------------------------------------------------------------------
+# Create the database first with:
+#   wrangler d1 create sybil-transfer-db
+# Then paste the printed database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "sybil-transfer-db"
+database_id = "ad53ab51-d14a-4485-a581-d0e37d68c51d"
+
+# ---------------------------------------------------------------------------
+# Environment variables (NON-SECRET — safe to commit)
+# ---------------------------------------------------------------------------
+[vars]
+ENVIRONMENT = "production"
+# Comma-separated list of allowed frontend origins for CORS.
+# Update this to your deployed Next.js origin(s).
+ALLOWED_ORIGINS = "https://sybil-transfer.netlify.app,http://localhost:3000"
+# Comma-separated list of Supabase user ids allowed to call /cleanup-transactions
+# (the "admin" cron endpoint). Get user ids from Supabase Dashboard -> Auth -> Users.
+ADMIN_USER_IDS = ""
+# Optional: JWKS URI for RS256 fallback (Supabase default is HS256; leave blank)
+SUPABASE_JWKS_URI = ""
+# Optional: Supabase project URL (used by the migration script only)
+SUPABASE_URL = ""
+
+# ---------------------------------------------------------------------------
+# SECRET environment variables — DO NOT put values here!
+# Set them with: wrangler secret put SUPABASE_JWT_SECRET
+#                 wrangler secret put CLEANUP_API_KEY
+# (and SUPABASE_SERVICE_ROLE_KEY only if you run the migration script
+#  via a worker — usually you run it locally, so don't put it here)
+# ---------------------------------------------------------------------------
+# SUPABASE_JWT_SECRET       — Supabase project's JWT secret (Dashboard -> Settings -> API -> JWT Secret)
+# CLEANUP_API_KEY           — bearer token for the cleanup cron job (generate with `openssl rand -hex 32`)
+
+# ---------------------------------------------------------------------------
+# Observability
+# ---------------------------------------------------------------------------
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Local dev — reads from .dev.vars (gitignored)
+# ---------------------------------------------------------------------------
+# .dev.vars.example is committed; copy to .dev.vars and fill in locally.
+
+# ---------------------------------------------------------------------------
+# Staging environment (optional)
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "sybil-transfer-worker-staging"
+vars = { ENVIRONMENT = "staging", ALLOWED_ORIGINS = "https://staging.your-app.netlify.app,http://localhost:3000" }

@@ -1,0 +1,33 @@
+# ---------------------------------------------------------------------------
+# NEVER commit these:
+# ---------------------------------------------------------------------------
+.dev.vars
+.env
+.env.local
+.env.*.local
+*.log
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.wrangler/
+.mf/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test output
+coverage/
+.nyc_output/
+
+# Wrangler local state
+wrangler.toml.local

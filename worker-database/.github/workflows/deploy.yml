@@ -1,0 +1,75 @@
+name: Deploy Worker to Cloudflare
+
+# ---------------------------------------------------------------------------
+# This workflow deploys the Worker to Cloudflare on every push to main.
+# Secrets are stored as GitHub Actions secrets (Settings -> Secrets and variables
+# -> Actions). They are NEVER written into the repo.
+#
+# Required GitHub Actions secrets:
+#   CLOUDFLARE_API_TOKEN   — Cloudflare API token with Workers + D1 permissions
+#   CLOUDFLARE_ACCOUNT_ID  — Your Cloudflare account id
+#   D1_DATABASE_ID         — D1 database id (printed by `wrangler d1 create`)
+#   SUPABASE_JWT_SECRET    — Supabase project's JWT secret (HS256 signing key)
+#   CLEANUP_API_KEY         — Bearer token for the cleanup cron endpoint
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker-database/**"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker-database
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "worker-database/package-lock.json"
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+        env:
+          # Vitest reads these via the @cloudflare/vitest-pool-workers config.
+          # In CI we use a fixed test secret — never the production one.
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Apply D1 migration (remote)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker-database
+          command: d1 execute sybil-transfer-db --remote --file=migrations/0001_init.sql
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker-database
+          command: deploy
+          # Pass secrets via environment for the deploy step.
+          secrets: |
+            SUPABASE_JWT_SECRET
+            CLEANUP_API_KEY
+        env:
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+          CLEANUP_API_KEY: ${{ secrets.CLEANUP_API_KEY }}
