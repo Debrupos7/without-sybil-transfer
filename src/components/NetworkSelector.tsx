@@ -5,35 +5,34 @@ import { useWeb3 } from '@/context/Web3Context';
 import { toast } from 'react-toastify';
 
 const NetworkSelector = () => {
-  const { 
-    networkType, 
-    setNetworkType, 
-    selectedNetwork, 
-    selectNetwork, 
+  const {
+    networkType,
+    setNetworkType,
+    selectedNetwork,
+    selectNetwork,
     availableNetworks,
     userNetworks,
-    switchNetwork
   } = useWeb3();
 
   // Handle network type change (mainnet/testnet)
-  const handleNetworkTypeChange = (type: 'mainnet' | 'testnet') => {
-    setNetworkType(type);
-    
+  const handleNetworkTypeChange = async (type: 'mainnet' | 'testnet') => {
     // Filter user networks by type
-    const filteredUserNetworks = userNetworks.filter(n => 
-      (type === 'mainnet' && !n.isTestnet) || 
+    const filteredUserNetworks = userNetworks.filter(n =>
+      (type === 'mainnet' && !n.isTestnet) ||
       (type === 'testnet' && n.isTestnet)
     );
-    
-    // Select first network of the new type
-    if (filteredUserNetworks.length > 0 && filteredUserNetworks[0].id) {
-      selectNetwork(filteredUserNetworks[0].id);
+
+    // Select first network of the new type (selectNetwork already
+    // switches the wallet and reverts on failure, so do not call
+    // switchNetwork again here — that used to double-prompt MetaMask).
+    const key = filteredUserNetworks.length > 0 && filteredUserNetworks[0].id
+      ? filteredUserNetworks[0].id
+      : (availableNetworks[type] && Object.keys(availableNetworks[type])[0]);
+    if (key) {
+      const ok = await selectNetwork(key);
+      if (!ok) toast.error('Failed to switch network: wallet did not change networks');
     } else {
-      // If no user networks, check default networks
-      const networks = availableNetworks[type];
-      if (networks && Object.keys(networks).length > 0) {
-        selectNetwork(Object.keys(networks)[0]);
-      }
+      setNetworkType(type);
     }
   };
 
@@ -60,23 +59,16 @@ const NetworkSelector = () => {
       }
     }
     
-    // Finally select the network
-    selectNetwork(networkKey);
-    
-    // Attempt to switch the connected wallet to this network
-    try {
-      // Find network in user networks or default networks
-      const network = userNetwork || 
-        availableNetworks.mainnet[networkKey] || 
-        availableNetworks.testnet[networkKey];
-      
-      if (network) {
-        await switchNetwork(network.chainId);
-        toast.success(`Switched to ${network.name}`);
-      }
-    } catch (error: any) {
-      toast.error(`Failed to switch network: ${error.message || 'Unknown error'}`);
-      console.error(error);
+    // Select the network — this already switches the connected wallet
+    // (and reverts the UI if the wallet refuses). Do not switch again.
+    const network = userNetwork ||
+      availableNetworks.mainnet[networkKey] ||
+      availableNetworks.testnet[networkKey];
+    const ok = await selectNetwork(networkKey);
+    if (ok && network) {
+      toast.success(`Switched to ${network.name}`);
+    } else if (!ok) {
+      toast.error('Failed to switch network: wallet did not change networks');
     }
   };
 

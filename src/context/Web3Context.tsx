@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { ethers } from 'ethers';
 import {
   getUserNetworks,
@@ -46,14 +46,17 @@ type Web3ContextType = {
   addNetwork: (network: Omit<NetworkInfo, 'id'>) => Promise<any>;
   editNetwork: (id: string, network: Partial<NetworkInfo>) => Promise<any>;
   deleteNetwork: (id: string) => Promise<void>;
-  addContract: (contract: Omit<UserContract, 'id'>) => Promise<void>;
-  editContract: (id: string, contract: Partial<UserContract>) => Promise<void>;
+  addContract: (contract: Omit<UserContract, 'id'>) => Promise<UserContract>;
+  editContract: (id: string, contract: Partial<UserContract>) => Promise<UserContract>;
   deleteContract: (id: string) => Promise<void>;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
-  switchNetwork: (chainId: number) => Promise<boolean | undefined>;
+  switchNetwork: (chainId: number, network?: NetworkInfo) => Promise<boolean>;
   setNetworkType: (type: 'mainnet' | 'testnet') => void;
-  selectNetwork: (networkKey: string) => void;
+  // Returns false when a connected wallet refused / failed to switch, so
+  // callers can revert the UI instead of showing a network the wallet
+  // is not actually on. Returns true when there is no wallet to switch.
+  selectNetwork: (networkKey: string) => Promise<boolean>;
   setSelectedNetwork: (network: NetworkInfo | null) => void;
   checkContractPermissions: () => Promise<void>;
   contractABI: any;
@@ -101,6 +104,12 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
   });
   const [userNetworks, setUserNetworks] = useState<NetworkInfo[]>([]);
   const [userContracts, setUserContracts] = useState<UserContract[]>([]);
+  // Chain the user explicitly asked to switch to. While this is set and
+  // the wallet has not yet moved to it, the wallet-sync effect below must
+  // NOT revert the UI back to the wallet's old chain (that was the
+  // /admin bug: picking anything other than the wallet's current chain,
+  // e.g. away from Monad Testnet, snapped straight back to Monad).
+  const pendingSwitchRef = useRef<number | null>(null);
 
   // Load network configurations and user-specific data
   useEffect(() => {
@@ -184,6 +193,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
       };
 
       const handleChainChanged = (chainId: string) => {
+        pendingSwitchRef.current = null;
         // Force page refresh on chain change
         window.location.reload();
       };
@@ -243,55 +253,57 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     autoConnectWallet();
   }, [account, user]);
 
-  // Add a separate effect to sync networks after wallet connection is established
+  // Sync the UI to the wallet's chain on connect / when the network
+  // lists load — but NOT on every selectedNetwork change. The old effect
+  // depended on selectedNetwork, so any explicit choice in /admin (which
+  // only called setSelectedNetwork, never switchNetwork) was immediately
+  // undone: the wallet was still on its old chain, so the effect reverted
+  // the dropdown to that chain. A user on Monad Testnet could therefore
+  // never leave Monad from /admin. This effect now only runs when the
+  // wallet, or the lists it can match against, change, and it stays out
+  // of the way while a user-requested switch is pending.
   useEffect(() => {
-    // Only run if we have an account but need to sync the network
     const syncNetworkWithWallet = async () => {
-      if (window.ethereum && account) {
-        try {
-          // Get the current chainId from the wallet
-          const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-          const currentChainId = parseInt(chainIdHex, 16);
-          
-          // Only sync if we don't already have a matching network selected
-          if (!selectedNetwork || selectedNetwork.chainId !== currentChainId) {
-            console.log('Syncing selected network with wallet network. Chain ID:', currentChainId);
-            
-            // Find the network that matches this chainId
-            const matchingUserNetwork = userNetworks.find(n => n.chainId === currentChainId);
-            
-            // If a matching network is found in user networks, select it
-            if (matchingUserNetwork && matchingUserNetwork.id) {
-              console.log(`Auto-selecting network ${matchingUserNetwork.name} to match wallet's current network`);
-              
-              // Manually update network state instead of calling selectNetwork to avoid circular dependencies
-              setNetworkType(matchingUserNetwork.isTestnet ? 'testnet' : 'mainnet');
-              setSelectedNetwork(matchingUserNetwork);
-            } else {
-              // Check default networks
-              let found = false;
-              for (const type of ['mainnet', 'testnet'] as const) {
-                for (const [key, network] of Object.entries(availableNetworks[type])) {
-                  if (network.chainId === currentChainId) {
-                    console.log(`Auto-selecting default network ${network.name} to match wallet's current network`);
-                    setNetworkType(type);
-                    setSelectedNetwork(network);
-                    found = true;
-                    break;
-                  }
+      if (!window.ethereum || !account) return;
+      try {
+        const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+        const currentChainId = parseInt(chainIdHex, 16);
+
+        // A switch the user asked for is in flight: the wallet is still
+        // on the old chain by design. Do not revert the new selection.
+        if (pendingSwitchRef.current !== null && pendingSwitchRef.current !== currentChainId) {
+          return;
+        }
+        pendingSwitchRef.current = null;
+
+        if (!selectedNetwork || selectedNetwork.chainId !== currentChainId) {
+          console.log('Syncing selected network with wallet network. Chain ID:', currentChainId);
+          const matchingUserNetwork = userNetworks.find(n => n.chainId === currentChainId);
+          if (matchingUserNetwork && matchingUserNetwork.id) {
+            console.log(`Auto-selecting network ${matchingUserNetwork.name} to match wallet's current network`);
+            setNetworkType(matchingUserNetwork.isTestnet ? 'testnet' : 'mainnet');
+            setSelectedNetwork(matchingUserNetwork);
+          } else {
+            for (const type of ['mainnet', 'testnet'] as const) {
+              for (const [, network] of Object.entries(availableNetworks[type])) {
+                if (network.chainId === currentChainId) {
+                  console.log(`Auto-selecting default network ${network.name} to match wallet's current network`);
+                  setNetworkType(type);
+                  setSelectedNetwork(network);
+                  return;
                 }
-                if (found) break;
               }
             }
           }
-        } catch (error) {
-          console.error('Error syncing network with wallet:', error);
         }
+      } catch (error) {
+        console.error('Error syncing network with wallet:', error);
       }
     };
-    
+
     syncNetworkWithWallet();
-  }, [account, userNetworks, availableNetworks, selectedNetwork]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, userNetworks, availableNetworks]);
 
   // Add a new user network
   const addNetwork = async (network: Omit<NetworkInfo, 'id'>) => {
@@ -395,11 +407,20 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     }, accessToken);
 
     if (error) throw error;
+    if (!data?.contract) throw new Error('Server did not return the created contract');
 
-    // Update local state
-    setUserContracts([...userContracts, data as any]);
+    // The Worker returns { contract: {...} }, not the contract itself.
+    // The old code appended the wrapper object as if it were a contract,
+    // so the new row had address/name/network_id all undefined — and the
+    // Dashboard table then crashed rendering it
+    // (contract.address.substring(...) on undefined), which is the
+    // "Application error: a client-side exception has occurred" seen
+    // right after adding a contract. addNetwork/editNetwork already
+    // unwrap data.network; contracts must unwrap data.contract the same way.
+    const created = data.contract as UserContract;
+    setUserContracts([...userContracts, created]);
 
-    return data as any;
+    return created;
   };
 
   // Edit a user contract
@@ -407,18 +428,20 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     if (!user) throw new Error('User not authenticated');
 
     // Worker's PUT endpoint for user-contracts takes the same shape
-    const { data, error } = await workerPut(`/user-contracts/${id}`, {
+    const { data, error } = await workerPut<{ contract: UserContract }>(`/user-contracts/${id}`, {
       name: contract.name,
       address: contract.address,
       network_id: contract.network_id,
     }, accessToken);
 
     if (error) throw error;
+    if (!data?.contract) throw new Error('Server did not return the updated contract');
 
-    // Update local state
-    setUserContracts(userContracts.map(c => c.id === id ? (data as any) : c));
+    // Same unwrap as addContract — do not store the { contract } wrapper.
+    const updated = data.contract as UserContract;
+    setUserContracts(userContracts.map(c => c.id === id ? updated : c));
 
-    return data as any;
+    return updated;
   };
 
   // Delete a user contract
@@ -466,6 +489,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
 
   // Disconnect wallet
   const disconnectWallet = () => {
+    pendingSwitchRef.current = null;
     setAccount(null);
     setProvider(null);
     setSigner(null);
@@ -473,118 +497,98 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
     setIsWhitelisted(false);
   };
 
-  // Improved switchNetwork function with retry mechanism and connection persistence
-  const switchNetwork = async (chainId: number) => {
+  // Switch the connected wallet to `chainId`. `network` must be the network
+  // being switched TO: the old code used the (stale) selectedNetwork for
+  // wallet_addEthereumChain, so adding an unlisted chain sent the wallet
+  // the previous network's name/RPC/explorer instead of the new one's.
+  // Returns false (instead of throwing) for a rejection / failed add, so
+  // callers can revert the UI. Never retries a user rejection or a
+  // pending-request error (-32002): retrying those just re-prompts MetaMask.
+  const switchNetwork = async (chainId: number, network?: NetworkInfo): Promise<boolean> => {
     if (!window.ethereum) {
       console.error('No Ethereum wallet detected');
-      return;
+      return false;
     }
-
-    // Maximum number of retries
-    const maxRetries = 3;
-    let retries = 0;
-    let success = false;
-
-    // Keep track of the original connection state
-    const wasConnected = !!account;
-
-    while (!success && retries < maxRetries) {
-      try {
-        // Try to switch to the network
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: `0x${chainId.toString(16)}` }],
-        });
-        success = true;
-      } catch (switchError: any) {
-        // This error code indicates that the chain has not been added to MetaMask
-        if (switchError.code === 4902 && selectedNetwork) {
-          try {
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [
-                {
-                  chainId: `0x${chainId.toString(16)}`,
-                  chainName: selectedNetwork.name,
-                  nativeCurrency: {
-                    name: selectedNetwork.currencySymbol,
-                    symbol: selectedNetwork.currencySymbol,
-                    decimals: 18,
-                  },
-                  rpcUrls: [selectedNetwork.rpcUrl],
-                  blockExplorerUrls: [selectedNetwork.explorerUrl.split('/tx')[0]],
+    const target = network || selectedNetwork;
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: `0x${chainId.toString(16)}` }],
+      });
+      return true;
+    } catch (switchError: any) {
+      if (switchError?.code === 4001 || switchError?.code === -32002) {
+        console.error('Network switch rejected or already pending:', switchError);
+        return false;
+      }
+      if (switchError?.code === 4902 && target) {
+        try {
+          // explorerUrl may be a "/tx/" URL (e.g. Monad's
+          // https://testnet.monadexplorer.com/tx/) or missing entirely;
+          // only pass blockExplorerUrls when we actually have one, and
+          // never call .split() on undefined (that crashed the add flow).
+          const explorerBase = target.explorerUrl
+            ? target.explorerUrl.split('/tx')[0].replace(/\/+$/, '')
+            : undefined;
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [
+              {
+                chainId: `0x${chainId.toString(16)}`,
+                chainName: target.name,
+                nativeCurrency: {
+                  name: target.currencySymbol,
+                  symbol: target.currencySymbol,
+                  decimals: 18,
                 },
-              ],
-            });
-            success = true;
-          } catch (addError) {
-            console.error(`Error adding Ethereum chain (attempt ${retries+1}/${maxRetries}):`, addError);
-            retries++;
-            
-            // Small delay before retry
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        } else if (switchError.code === 4001) {
-          // User rejected the request
-          console.error('User rejected the network switch request');
-          throw switchError;
-        } else {
-          console.error(`Error switching Ethereum chain (attempt ${retries+1}/${maxRetries}):`, switchError);
-          retries++;
-          
-          // Small delay before retry
-          await new Promise(resolve => setTimeout(resolve, 500));
+                ...(target.rpcUrl ? { rpcUrls: [target.rpcUrl] } : {}),
+                ...(explorerBase ? { blockExplorerUrls: [explorerBase] } : {}),
+              },
+            ],
+          });
+          return true;
+        } catch (addError: any) {
+          console.error('Error adding Ethereum chain:', addError);
+          return false;
         }
       }
+      console.error('Error switching Ethereum chain:', switchError);
+      return false;
     }
-
-    // If we were connected before and the switch succeeded, ensure we're still connected
-    if (wasConnected && success && !account) {
-      try {
-        // Reconnect wallet if it got disconnected during the network switch
-        await connectWallet();
-      } catch (error) {
-        console.error('Failed to reconnect wallet after network switch:', error);
-      }
-    }
-
-    return success;
   };
 
-  // Select network
-  const selectNetwork = (networkKey: string) => {
-    // Check if this is a user-defined network first
+  // Select a network and, when a wallet is connected, switch the wallet
+  // to it. The old version was fire-and-forget (switchNetwork().catch),
+  // so /admin could show a network the wallet was never switched to —
+  // and the sync effect then snapped it back. This returns whether the
+  // wallet switch succeeded and reverts the UI on failure.
+  const selectNetwork = async (networkKey: string): Promise<boolean> => {
     const userNetwork = userNetworks.find(n => n.id === networkKey);
-    
-    if (userNetwork) {
-      // Set the network type based on the isTestnet flag of the selected network
-      // Ensure isTestnet is treated as a boolean
-      const isTestnetNetwork = Boolean(userNetwork.isTestnet);
-      console.log(`Selecting user network: ${userNetwork.name}, isTestnet: ${isTestnetNetwork}`);
-      setNetworkType(isTestnetNetwork ? 'testnet' : 'mainnet');
-      setSelectedNetwork(userNetwork);
-      
-      // If wallet is connected, try to switch to this network
-      if (provider && account) {
-        switchNetwork(userNetwork.chainId).catch(console.error);
+    const network = userNetwork || availableNetworks[networkType]?.[networkKey];
+    if (!network) return false;
+
+    const previous = selectedNetwork;
+    const previousType = networkType;
+    const isTestnetNetwork = Boolean(network.isTestnet);
+    console.log(`Selecting network: ${network.name}, isTestnet: ${isTestnetNetwork}`);
+    setNetworkType(isTestnetNetwork ? 'testnet' : 'mainnet');
+    setSelectedNetwork(network);
+
+    if (provider && account) {
+      pendingSwitchRef.current = network.chainId;
+      const ok = await switchNetwork(network.chainId, network);
+      if (!ok) {
+        // Wallet did not move: do not leave the UI on a chain the wallet
+        // is not on (contract calls would go to the wrong chain).
+        pendingSwitchRef.current = null;
+        setNetworkType(previousType);
+        setSelectedNetwork(previous);
+        return false;
       }
-      return;
+      // chainChanged reloads the page on most wallets; if it does not,
+      // the pending flag keeps the sync effect from reverting us.
     }
-    
-    // If not a user network, check available networks
-    const network = availableNetworks[networkType][networkKey];
-    if (network) {
-      // Set the network type based on the isTestnet flag
-      const isTestnetNetwork = Boolean(network.isTestnet);
-      console.log(`Selecting default network: ${network.name}, isTestnet: ${isTestnetNetwork}`);
-      setNetworkType(isTestnetNetwork ? 'testnet' : 'mainnet');
-      setSelectedNetwork(network);
-      
-      // If wallet is connected, try to switch to this network
-      if (provider && account) {
-        switchNetwork(network.chainId).catch(console.error);
-      }
-    }
+    return true;
   };
 
   // Check contract permissions (owner, whitelist)

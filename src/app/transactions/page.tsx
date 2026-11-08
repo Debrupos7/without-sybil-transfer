@@ -290,8 +290,10 @@ export default function TransactionsPage() {
     // Safely check if explorer URL exists and add a trailing slash if needed
     const explorerUrl = network.explorerUrl || '';
     if (!explorerUrl) return '#';
-    
-    const baseUrl = explorerUrl.endsWith('/') ? explorerUrl : `${explorerUrl}/`;
+
+    // Stored explorer URLs may end in /tx/ (old format) — strip it
+    // first, otherwise this builds .../tx/tx/<hash>.
+    const baseUrl = explorerUrl.replace(/\/tx\/?$/, '').replace(/\/+$/, '') + '/';
     return `${baseUrl}tx/${tx.tx_hash}`;
   };
 
@@ -305,8 +307,8 @@ export default function TransactionsPage() {
     // Safely check if explorer URL exists and add a trailing slash if needed
     const explorerUrl = network.explorerUrl || '';
     if (!explorerUrl) return '#';
-    
-    const baseUrl = explorerUrl.endsWith('/') ? explorerUrl : `${explorerUrl}/`;
+
+    const baseUrl = explorerUrl.replace(/\/tx\/?$/, '').replace(/\/+$/, '') + '/';
     return `${baseUrl}address/${address}`;
   };
 

@@ -21,23 +21,29 @@ interface ChainlistSearchProps {
 export default function ChainlistSearch({ onSelect, onClose, isOpen }: ChainlistSearchProps) {
   const [networks, setNetworks] = useState<ChainlistNetwork[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Load networks when component mounts
   useEffect(() => {
-    if (isOpen && networks.length === 0) {
+    if (isOpen && networks.length === 0 && !loadError) {
       loadNetworks();
     }
-  }, [isOpen, networks.length]);
+  }, [isOpen, networks.length, loadError]);
 
   // Fetch networks from Chainlist
   const loadNetworks = async () => {
     try {
       setIsLoading(true);
+      setLoadError(null);
       const chainlistNetworks = await fetchChainlistNetworks();
       setNetworks(chainlistNetworks);
     } catch (error: any) {
+      // The old code only toasted here and left the modal showing
+      // "Loading networks from Chainlist..." forever (networks stayed
+      // empty, isLoading went false, and there was no way to retry).
       console.error('Error fetching chainlist networks:', error);
+      setLoadError(error?.message || 'Failed to load networks from Chainlist');
       toast.error('Failed to load networks from Chainlist');
     } finally {
       setIsLoading(false);
@@ -51,17 +57,25 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
 
   // Handle network selection
   const handleSelectNetwork = (network: ChainlistNetwork) => {
+    const rpcUrl = getBestRpcUrl(network);
+    if (!rpcUrl) {
+      // Some Chainlist entries have no usable HTTP RPC at all (empty
+      // list, wss-only, or only ${PLACEHOLDER} URLs). Saving one would
+      // create a network that can never be used — and the old code
+      // crashed in getBestRpcUrl before it even got here.
+      toast.error(`${network.name} has no usable RPC URL in Chainlist, so it cannot be added automatically. Add it manually instead.`);
+      return;
+    }
     const networkInfo: Omit<NetworkInfo, 'id'> = {
       name: network.name,
       chainId: network.chainId,
-      rpcUrl: getBestRpcUrl(network),
+      rpcUrl,
       currencySymbol: network.nativeCurrency?.symbol || '',
       explorerUrl: getExplorerUrl(network),
       isTestnet: isTestnet(network)
     };
-    
+
     onSelect(networkInfo);
-    toast.info('Network imported from Chainlist. You can still modify details before saving.');
   };
 
   if (!isOpen) return null;
@@ -107,6 +121,18 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
             <div className="flex justify-center items-center h-32">
               <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500"></div>
             </div>
+          ) : loadError ? (
+            <div className="text-center py-8">
+              <p className="text-red-600 mb-4">
+                Could not load networks from Chainlist. Check your connection and try again.
+              </p>
+              <button
+                onClick={loadNetworks}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                Retry
+              </button>
+            </div>
           ) : networks.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-500">
@@ -144,7 +170,7 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                       {network.nativeCurrency?.symbol || 'Unknown Token'}
                     </span>
-                    {network.name.toLowerCase().includes('testnet') && (
+                    {isTestnet(network) && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                         Testnet
                       </span>

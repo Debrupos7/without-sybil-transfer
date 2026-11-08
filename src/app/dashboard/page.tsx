@@ -72,13 +72,31 @@ export default function Dashboard() {
     }
   }, [user, authLoading, router]);
   
-  // Handler for importing a network from Chainlist
-  const handleChainlistNetworkSelect = (network: Omit<NetworkInfo, 'id'>) => {
-    setNetworkForm(network);
+  // Handler for importing a network from Chainlist — this is the
+  // "auto add": picking a network saves it immediately, instead of
+  // only filling the Add Network form and leaving the user to press
+  // Save (which is where it used to die: Chainlist often has no
+  // explorer URL, and the form required one, so the save could never
+  // succeed for those chains). If the save fails for any reason, the
+  // form still opens with the imported values filled in, so the user
+  // can fix the problem instead of losing the import.
+  const handleChainlistNetworkSelect = async (network: Omit<NetworkInfo, 'id'>) => {
     setIsChainlistModalOpen(false);
-    setModalType('network');
-    setIsEditing(false);
-    setIsModalOpen(true);
+    if (userNetworks.some((n) => n.chainId === network.chainId)) {
+      toast.info(`${network.name} is already in your networks.`);
+      return;
+    }
+    try {
+      await addNetwork(network);
+      toast.success(`${network.name} added from Chainlist.`);
+    } catch (error: any) {
+      console.error('Chainlist auto-add failed, opening the form instead:', error);
+      toast.error(`Could not add ${network.name} automatically: ${error?.message || 'unknown error'}. Check the details and save manually.`);
+      setNetworkForm(network);
+      setModalType('network');
+      setIsEditing(false);
+      setIsModalOpen(true);
+    }
   };
   
   // Handler for opening the Add/Edit modal
@@ -138,10 +156,14 @@ export default function Dashboard() {
   // Handler for network form submission
   const handleNetworkSubmit = async () => {
     try {
-      // Validate form
-      if (!networkForm.name || !networkForm.chainId || !networkForm.rpcUrl || 
-          !networkForm.currencySymbol || !networkForm.explorerUrl) {
-        toast.error('Please fill in all required fields');
+      // Validate form. Explorer URL is deliberately NOT required:
+      // many Chainlist chains (e.g. Hyperliquid Testnet) have no
+      // explorer at all, and requiring one made those networks
+      // impossible to add — the form just refused to save with no
+      // explanation of which field was the problem.
+      if (!networkForm.name || !networkForm.chainId || !networkForm.rpcUrl ||
+          !networkForm.currencySymbol) {
+        toast.error('Please fill in the name, chain ID, RPC URL and currency symbol');
         return;
       }
       
@@ -412,7 +434,9 @@ export default function Dashboard() {
                                 <td className="px-4 py-3 whitespace-nowrap text-sm">{contract.name}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm hidden sm:table-cell">{network?.name || 'Unknown'}</td>
                                 <td className="px-4 py-3 whitespace-nowrap font-mono text-xs">
-                                  {contract.address.substring(0, 6)}...{contract.address.substring(contract.address.length - 4)}
+                                  {contract.address
+                                    ? `${contract.address.substring(0, 6)}...${contract.address.substring(contract.address.length - 4)}`
+                                    : '—'}
                                 </td>
                                 <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
                                   <button
@@ -498,7 +522,7 @@ export default function Dashboard() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Explorer URL</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Explorer URL <span className="text-gray-400 font-normal">(optional — some chains have none)</span></label>
                     <input
                       type="text"
                       value={networkForm.explorerUrl}

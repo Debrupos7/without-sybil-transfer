@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 export default function AdminPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
-  const { account, signer, selectedNetwork, userNetworks, userContracts, getContractInstance, setSelectedNetwork } = useWeb3();
+  const { account, signer, selectedNetwork, userNetworks, userContracts, getContractInstance, selectNetwork } = useWeb3();
   const [contractAddress, setContractAddress] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isContractOwner, setIsContractOwner] = useState(false);
@@ -344,22 +344,47 @@ export default function AdminPage() {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
+  // Explorer base URL for links. Stored explorer URLs are inconsistent:
+  // some end in /tx/ (the old network_config format), some are a bare
+  // base URL (Chainlist), some are empty. Appending /address/... to a
+  // /tx/ URL produced broken .../tx//address/... links, and appending
+  // it to an empty URL produced /address/... — so normalise here and
+  // return '' when there is no explorer to link to.
+  const explorerBase = (url?: string) => {
+    if (!url) return '';
+    return url.replace(/\/tx\/?$/, '').replace(/\/+$/, '');
+  };
+  const explorerAddressUrl = (address: string) => {
+    const base = explorerBase(selectedNetwork?.explorerUrl);
+    return base ? `${base}/address/${address}` : '#';
+  };
+
   // Filter contracts for the selected network
   const filteredContracts = userContracts.filter(
     contract => contract.network_id === selectedNetwork?.id
   );
 
-  // Handle network selection
-  const handleNetworkChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  // Handle network selection. The old version only called
+  // setSelectedNetwork(): the wallet stayed on its previous chain, so
+  // Web3Context's wallet-sync effect immediately reverted the dropdown
+  // (a wallet on Monad Testnet could never leave Monad from here), and
+  // contract calls would then have gone to the wrong chain anyway.
+  // selectNetwork() switches the wallet too and reverts on failure, so
+  // only clear the contract selection once the switch actually happened.
+  const handleNetworkChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const networkId = e.target.value;
+    if (!networkId) return;
     const network = userNetworks.find(n => n.id === networkId);
-    if (network) {
-      console.log(`Admin page: selecting network ${network.name}, isTestnet: ${Boolean(network.isTestnet)}`);
-      setSelectedNetwork(network);
-      setSelectedContract(''); // Reset contract selection when network changes
-      setContractAddress('');
-      setWhitelistedAddresses([]);
+    if (!network) return;
+    console.log(`Admin page: selecting network ${network.name}, isTestnet: ${Boolean(network.isTestnet)}`);
+    const ok = await selectNetwork(network.id!);
+    if (!ok) {
+      toast.error('Network switch was rejected or failed — still on the previous network');
+      return;
     }
+    setSelectedContract(''); // Reset contract selection when network changes
+    setContractAddress('');
+    setWhitelistedAddresses([]);
   };
 
   // Debug output for networks
@@ -501,7 +526,7 @@ export default function AdminPage() {
                             <p className="text-gray-700 mb-2">
                               <span className="font-medium text-indigo-700">Address:</span>{' '}
                               <a
-                                href={`${selectedNetwork?.explorerUrl}/address/${contractAddress}`}
+                                href={explorerAddressUrl(contractAddress)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-indigo-600 hover:underline font-mono bg-white px-2 py-1 rounded border border-indigo-100"
@@ -731,7 +756,7 @@ export default function AdminPage() {
                                           {whitelistedAddresses.map((address) => (
                                             <li key={address} className="p-3 flex justify-between items-center hover:bg-gray-50">
                                               <a 
-                                                href={`${selectedNetwork?.explorerUrl}/address/${address}`}
+                                                href={explorerAddressUrl(address)}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="text-sm font-mono text-indigo-600 hover:underline flex-1 truncate"

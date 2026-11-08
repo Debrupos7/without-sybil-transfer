@@ -6,9 +6,16 @@ const securityConfig = {
   poweredByHeader: false,
 
   async headers() {
+    // connect-src must list every host the browser is allowed to fetch
+    // from. Chainlist is fetched directly from the browser
+    // (src/utils/chainlistService.ts -> https://chainlist.org/rpcs.json),
+    // and it was never in this list — not even before the CSP rewrite —
+    // so the browser refused the request and the Chainlist modal could
+    // never load any networks. The old code also emitted 'self' twice.
     const connectSrc = [
       "'self'",
       workerUrl,
+      'https://chainlist.org',
     ].filter(Boolean).join(' ');
 
     return [
@@ -23,7 +30,7 @@ const securityConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https:",
               "font-src 'self' data:",
-              `connect-src 'self' ${connectSrc}`,
+              `connect-src ${connectSrc}`,
               "frame-ancestors 'none'",
               "base-uri 'none'",
               "form-action 'self'",

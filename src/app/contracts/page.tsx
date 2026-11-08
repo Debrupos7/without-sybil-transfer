@@ -9,45 +9,59 @@ const ContractsPage = () => {
   const [copied, setCopied] = useState<string | null>(null);
   const [mainContractCode, setMainContractCode] = useState<string>('');
   const [childContractCode, setChildContractCode] = useState<string>('');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch contract code on component mount
-    const fetchContracts = async () => {
-      try {
-        console.log('Fetching MainContract.sol...');
-        // Fetch MainContract.sol
-        const mainRes = await fetch('/api/contracts/MainContract');
-        if (!mainRes.ok) {
-          console.error('MainContract fetch failed:', mainRes.status, mainRes.statusText);
-          toast.error(`Failed to load MainContract: ${mainRes.statusText}`);
-          return;
-        }
-        const mainData = await mainRes.text();
-        console.log('MainContract loaded, length:', mainData.length);
-        setMainContractCode(mainData);
+    // The .sol files live in public/contract-sources/ and are served as
+    // static files — no API route needed. The old code fetched
+    // /api/contracts/MainContract, but that route was deleted in the
+    // Supabase -> Worker migration (c65c518), so every load 404'd, the
+    // first failure returned early, and both panes spun forever.
+    // Fetch both files independently, and reject an HTML error page
+    // (which a 404 / proxy would return with a 200) instead of
+    // rendering it as if it were Solidity.
+    const fetchOne = async (filename: string) => {
+      const res = await fetch(`/contract-sources/${filename}`);
+      if (!res.ok) throw new Error(`${filename}: HTTP ${res.status}`);
+      const text = await res.text();
+      if (!text.trim() || text.trimStart().startsWith('<')) {
+        throw new Error(`${filename}: server did not return Solidity source`);
+      }
+      return text;
+    };
 
-        console.log('Fetching ChildContract.sol...');
-        // Fetch ChildContract.sol
-        const childRes = await fetch('/api/contracts/ChildContract');
-        if (!childRes.ok) {
-          console.error('ChildContract fetch failed:', childRes.status, childRes.statusText);
-          toast.error(`Failed to load ChildContract: ${childRes.statusText}`);
-          return;
-        }
-        const childData = await childRes.text();
-        console.log('ChildContract loaded, length:', childData.length);
-        setChildContractCode(childData);
-      } catch (error) {
-        console.error('Error fetching contract code:', error);
-        toast.error('Failed to load contract files');
+    const fetchContracts = async () => {
+      setLoadError(null);
+      const [main, child] = await Promise.allSettled([
+        fetchOne('MainContract.sol'),
+        fetchOne('ChildContract.sol'),
+      ]);
+      if (main.status === 'fulfilled') {
+        setMainContractCode(main.value);
+      } else {
+        console.error('MainContract fetch failed:', main.reason);
+      }
+      if (child.status === 'fulfilled') {
+        setChildContractCode(child.value);
+      } else {
+        console.error('ChildContract fetch failed:', child.reason);
+      }
+      if (main.status === 'rejected' || child.status === 'rejected') {
+        const msg = 'Contract source files could not be loaded. Please refresh the page.';
+        setLoadError(msg);
+        toast.error(msg);
       }
     };
-    
+
     fetchContracts();
   }, []);
 
   // Copy function
   const copyToClipboard = (text: string, type: string) => {
+    if (!text) {
+      toast.error('Contract source has not loaded yet');
+      return;
+    }
     navigator.clipboard.writeText(text);
     setCopied(type);
     toast.success(`${type} copied to clipboard!`);
@@ -56,6 +70,10 @@ const ContractsPage = () => {
 
   // Download function
   const downloadFile = (content: string, filename: string) => {
+    if (!content) {
+      toast.error('Contract source has not loaded yet');
+      return;
+    }
     const element = document.createElement('a');
     const file = new Blob([content], {type: 'text/plain'});
     element.href = URL.createObjectURL(file);
@@ -68,6 +86,10 @@ const ContractsPage = () => {
 
   // Open in Remix function
   const openInRemix = (content: string) => {
+    if (!content) {
+      toast.error('Contract source has not loaded yet');
+      return;
+    }
     const encodedContent = encodeURIComponent(content);
     const remixUrl = `https://remix.ethereum.org/?#code=${encodedContent}`;
     window.open(remixUrl, '_blank');
@@ -88,6 +110,11 @@ const ContractsPage = () => {
           </div>
           
           <div className="p-4 sm:p-6">
+            {loadError && (
+              <div className="mb-6 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {loadError}
+              </div>
+            )}
             <div className="mb-8 sm:mb-10">
               <h2 className="text-xl font-semibold mb-4">Deployment Instructions</h2>
               <ol className="list-decimal pl-4 sm:pl-6 space-y-3 text-gray-700 text-sm sm:text-base">

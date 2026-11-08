@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
@@ -53,7 +53,7 @@ type UserWallet = {
 
 const TransferForm = () => {
   const { user } = useAuth();
-  const { account, signer, selectedNetwork, userNetworks, userContracts, getContractInstance } = useWeb3();
+  const { account, provider, signer, selectedNetwork, userNetworks, userContracts, getContractInstance, getProvider } = useWeb3();
   const [recipients, setRecipients] = useState<Recipient[]>([{ address: '', amount: '' }]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedContractId, setSelectedContractId] = useState('');
@@ -72,7 +72,71 @@ const TransferForm = () => {
   const [selectedGroup, setSelectedGroup] = useState<WalletGroup | null>(null);
   const [selectedGroupWallets, setSelectedGroupWallets] = useState<string[]>([]);
   const [isLoadingGroups, setIsLoadingGroups] = useState<boolean>(false);
-  
+
+  // Wallet balance on the selected network, shown automatically while
+  // transferring. The form used to show no balance at all — only the
+  // total to send — so a user could only discover they were short when
+  // gas estimation failed with a cryptic INSUFFICIENT_FUNDS error.
+  const [walletBalance, setWalletBalance] = useState<string | null>(null);
+  // Wei as a decimal string (not an ethers BigNumber): the repo has
+  // two ethers type definitions installed, and their BigNumber types
+  // are not assignable to each other. Strings + native BigInt avoid
+  // that mismatch entirely, for both math and display.
+  const [walletBalanceWei, setWalletBalanceWei] = useState<string | null>(null);
+  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+
+  // Fetch the connected wallet's native balance on the SELECTED
+  // network (not just whichever chain the wallet happens to be on:
+  // the selected network's RPC is the one the transfer will use).
+  // Falls back to the wallet provider if the network RPC cannot be
+  // reached, so a dead RPC shows a stale/wallet-chain balance rather
+  // than crashing — the submit-time pre-flight check re-reads the
+  // balance fresh before any transaction is sent.
+  const refreshBalance = useCallback(async () => {
+    if (!account || !selectedNetwork) {
+      setWalletBalance(null);
+      setWalletBalanceWei(null);
+      setBalanceError(null);
+      return;
+    }
+    setIsBalanceLoading(true);
+    try {
+      let balance: string | null = null;
+      const rpcProvider = selectedNetwork.rpcUrl ? getProvider(selectedNetwork.rpcUrl) : null;
+      if (rpcProvider) {
+        try {
+          balance = (await rpcProvider.getBalance(account)).toString();
+        } catch (rpcError) {
+          console.error('Balance via network RPC failed, falling back to wallet provider:', rpcError);
+        }
+      }
+      if (!balance && provider) {
+        balance = (await provider.getBalance(account)).toString();
+      }
+      if (!balance) throw new Error('No provider available to read the balance');
+      setWalletBalanceWei(balance);
+      setWalletBalance(ethers.utils.formatEther(balance));
+      setBalanceError(null);
+    } catch (error) {
+      console.error('Failed to load wallet balance:', error);
+      setBalanceError('Balance unavailable — the network RPC did not respond. Tap refresh to try again.');
+    } finally {
+      setIsBalanceLoading(false);
+    }
+  }, [account, selectedNetwork, provider, getProvider]);
+
+  // Auto-load on wallet / network change, and refresh every 30s while
+  // the form is open so the number stays current as funds move.
+  useEffect(() => {
+    refreshBalance();
+  }, [refreshBalance]);
+
+  useEffect(() => {
+    const interval = setInterval(() => { refreshBalance(); }, 30000);
+    return () => clearInterval(interval);
+  }, [refreshBalance]);
+
   // Flag to enable wallet groups feature
   const enableWalletGroups = true; // Turn on wallet groups feature
   
@@ -279,8 +343,40 @@ const TransferForm = () => {
         return false;
       }
     }
-    
+
+    // Do not let the user submit a batch the displayed balance cannot
+    // cover (before gas — the submit-time check also adds gas). Only
+    // blocks when a balance is actually known; while it is loading or
+    // unavailable, the submit-time pre-flight check is the backstop.
+    if (walletBalanceWei) {
+      try {
+        const totalWei = recipientsToValidate.reduce(
+          (sum, r) => sum + BigInt(ethers.utils.parseEther(r.amount || '0').toString()),
+          BigInt(0)
+        );
+        if (totalWei > BigInt(walletBalanceWei)) return false;
+      } catch {
+        // An unparseable amount is already rejected above; ignore here.
+      }
+    }
+
     return true;
+  };
+
+  // Total for the recipients currently being entered (individual/group
+  // mode) or reviewed (bulk mode), as a wei decimal string, or null
+  // when the amounts cannot be parsed yet.
+  const currentTotalWei = (): string | null => {
+    const list = inputMode === 'bulk' ? validatedRecipients : recipients;
+    try {
+      const total = list.reduce(
+        (sum, r) => sum + BigInt(ethers.utils.parseEther(r.amount || '0').toString()),
+        BigInt(0)
+      );
+      return total.toString();
+    } catch {
+      return null;
+    }
   };
 
   // Process bulk addresses
@@ -466,6 +562,32 @@ const TransferForm = () => {
       // Calculate total value to send
       const totalValue = amounts.reduce((sum, val) => sum.add(val), ethers.BigNumber.from('0'));
 
+      // Pre-flight balance check, before estimateGas and before logging a
+      // pending transaction. Without this, an unaffordable batch reaches
+      // eth_estimateGas and the node rejects it with the cryptic
+      // "insufficient funds for intrinsic transaction cost" error — e.g.
+      // sending 0.491 + 0.495 = 0.986 from a wallet holding only
+      // 0.49986, a 0.48614 shortfall before gas is even counted.
+      // Gas is checked again after estimation (total + gas, with buffer).
+      if (account && provider) {
+        try {
+          const balance = await provider.getBalance(account);
+          if (totalValue.gt(balance)) {
+            toast.error(
+              `Insufficient funds: you are trying to send ${ethers.utils.formatEther(totalValue)} ` +
+              `${selectedNetwork?.currencySymbol || ''} but this wallet holds only ` +
+              `${ethers.utils.formatEther(balance)}. Reduce the amounts or top up the wallet first.`
+            );
+            setIsProcessing(false);
+            return;
+          }
+        } catch (balanceError) {
+          // If the balance read itself fails, let estimateGas report the
+          // real error rather than blocking on a secondary failure.
+          console.error('Balance check failed, continuing to gas estimation:', balanceError);
+        }
+      }
+
       // Log pending transaction first — THE BUG FIX: the Worker forces user_id
       // from the JWT, so even if user.id is missing here, the transaction is
       // still correctly associated with the logged-in user (not the wallet).
@@ -499,17 +621,47 @@ const TransferForm = () => {
         );
       } catch (error: any) {
         console.error('Gas estimation failed:', error);
-        toast.error(`Gas estimation failed: ${error.message || 'Unable to estimate gas'}`);
+        // eth_estimateGas fails with INSUFFICIENT_FUNDS when balance <
+        // value + gas, but ethers surfaces the raw node error (including
+        // the RPC URL and calldata). Translate it into the actual cause.
+        if (error.code === 'INSUFFICIENT_FUNDS' || /INSUFFICIENT_FUNDS|insufficient funds/i.test(error.message || '')) {
+          toast.error(
+            'Insufficient funds: this wallet does not hold enough to cover the total amount plus gas. ' +
+            'Reduce the amounts or top up the wallet, then try again.'
+          );
+        } else {
+          toast.error(`Gas estimation failed: ${error.message || 'Unable to estimate gas'}`);
+        }
         setIsProcessing(false);
         return;
       }
-      
+
       // Get gas price
       const gasPrice = await contract.provider.getGasPrice();
-      
+
       // Calculate gas cost
       const gasCost = gasEstimate.mul(gasPrice);
       const gasCostEther = ethers.utils.formatEther(gasCost);
+
+      // The send below uses gasLimit = estimate * 1.2, so the wallet must
+      // cover value + that buffered gas, not just value + raw estimate.
+      if (account && provider) {
+        try {
+          const balance = await provider.getBalance(account);
+          const bufferedGasCost = gasCost.mul(12).div(10);
+          if (totalValue.add(bufferedGasCost).gt(balance)) {
+            toast.error(
+              `Insufficient funds for gas: sending ${ethers.utils.formatEther(totalValue)} needs ` +
+              `about ${ethers.utils.formatEther(bufferedGasCost)} more for gas, but this wallet holds ` +
+              `${ethers.utils.formatEther(balance)} in total. Reduce the amounts or top up the wallet first.`
+            );
+            setIsProcessing(false);
+            return;
+          }
+        } catch (balanceError) {
+          console.error('Post-estimate balance check failed:', balanceError);
+        }
+      }
       
       // Execute the transaction with appropriate transaction overrides
       const txOptions = { 
@@ -579,6 +731,9 @@ const TransferForm = () => {
         }
         
         toast.success('Transfer completed successfully!');
+        // The displayed balance is now out of date — refresh it so the
+        // next transfer shows the post-transfer balance.
+        refreshBalance();
       } catch (error: any) {
         console.error('Error waiting for transaction receipt:', error);
         
@@ -639,6 +794,19 @@ const TransferForm = () => {
     if (!address) return '';
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
+
+  // Numbers for the balance panel, computed once per render. Note:
+  // BigNumber is unsigned, so remaining is only computed when the
+  // total fits inside the balance; otherwise the shortfall is shown.
+  const totalWeiForDisplay = currentTotalWei();
+  const shortfallWei =
+    walletBalanceWei && totalWeiForDisplay && BigInt(totalWeiForDisplay) > BigInt(walletBalanceWei)
+      ? (BigInt(totalWeiForDisplay) - BigInt(walletBalanceWei)).toString()
+      : null;
+  const remainingWei =
+    walletBalanceWei && totalWeiForDisplay && !shortfallWei
+      ? (BigInt(walletBalanceWei) - BigInt(totalWeiForDisplay)).toString()
+      : null;
 
   // Check for wallet connection and permissions
   if (!account) {
@@ -705,6 +873,69 @@ const TransferForm = () => {
                   Network: <span className="font-medium">{selectedNetwork?.name}</span>
                 </p>
               </>
+            )}
+          </div>
+
+          {/* Wallet balance — shown automatically while transferring.
+              Loads on wallet/network change, refreshes every 30s, and
+              after a completed transfer. */}
+          <div className="mb-6 bg-gray-50 border border-gray-200 rounded-md p-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Sending from
+                </p>
+                <p className="text-sm text-gray-700 font-mono">
+                  {truncateEthAddress(account || '')}
+                  <span className="text-gray-500"> on {selectedNetwork?.name || '—'}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={refreshBalance}
+                disabled={isBalanceLoading}
+                className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                title="Refresh balance"
+              >
+                {isBalanceLoading ? 'Refreshing…' : '↻ Refresh'}
+              </button>
+            </div>
+
+            <div className="flex justify-between items-center mt-3">
+              <span className="text-sm font-medium text-gray-700">Wallet Balance</span>
+              <span className="text-lg font-semibold">
+                {isBalanceLoading && walletBalance === null
+                  ? 'Loading…'
+                  : balanceError
+                    ? <span className="text-sm text-red-600">{balanceError}</span>
+                    : `${walletBalance} ${selectedNetwork?.currencySymbol || ''}`}
+              </span>
+            </div>
+
+            {walletBalance !== null && totalWeiForDisplay && (
+              <div className="mt-2 space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Total to send</span>
+                  <span className="font-medium">{ethers.utils.formatEther(totalWeiForDisplay)} {selectedNetwork?.currencySymbol}</span>
+                </div>
+                {shortfallWei ? (
+                  <div className="flex justify-between text-red-600 font-medium">
+                    <span>Short by</span>
+                    <span>{ethers.utils.formatEther(shortfallWei)} {selectedNetwork?.currencySymbol}</span>
+                  </div>
+                ) : remainingWei ? (
+                  <div className="flex justify-between text-green-700">
+                    <span>Remaining after send</span>
+                    <span>{ethers.utils.formatEther(remainingWei)} {selectedNetwork?.currencySymbol}</span>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {shortfallWei && (
+              <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                Total exceeds your balance by {ethers.utils.formatEther(shortfallWei)} {selectedNetwork?.currencySymbol} (before gas). Reduce the amounts or top up the wallet — this transfer cannot succeed as it stands.
+              </p>
             )}
           </div>
 

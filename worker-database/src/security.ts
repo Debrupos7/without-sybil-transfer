@@ -194,7 +194,13 @@ export const newNetworkSchema = z.object({
   chain_id: chainIdSchema,
   rpc_url: urlSchema,
   currency_symbol: z.string().min(1).max(20),
-  explorer_url: urlSchema,
+  // Explorer is optional: many Chainlist chains (e.g. Hyperliquid
+  // Testnet) have no explorer, and requiring a valid URL here made
+  // those networks impossible to add — the Worker rejected the save
+  // with validation_failed even after the frontend allowed it.
+  // Empty string (or omitted) is accepted; a non-empty value must
+  // still be a valid URL.
+  explorer_url: z.union([urlSchema, z.literal('')]).optional().default(''),
   is_testnet: z.boolean(),
 });
 
