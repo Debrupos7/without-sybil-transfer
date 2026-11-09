@@ -2,9 +2,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-toastify';
-import { 
+import {
   ChainlistNetwork,
   fetchChainlistNetworks,
+  refreshChainlistNetworksInBackground,
+  getChainlistLastUpdated,
+  isChainlistCacheStale,
   searchNetworks,
   getBestRpcUrl,
   getExplorerUrl,
@@ -21,23 +24,45 @@ interface ChainlistSearchProps {
 export default function ChainlistSearch({ onSelect, onClose, isOpen }: ChainlistSearchProps) {
   const [networks, setNetworks] = useState<ChainlistNetwork[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(10);
 
-  // Load networks when component mounts
+  // Load networks when the modal opens. If the list is already loaded
+  // but older than the 1-hour cache TTL, re-fetch it in the background
+  // instead of blocking on it — the modal keeps showing the old list
+  // and swaps in the fresh one when it arrives, so chains Chainlist
+  // adds later appear automatically without a tab reload.
   useEffect(() => {
-    if (isOpen && networks.length === 0 && !loadError) {
+    if (!isOpen) return;
+    if (networks.length === 0 && !loadError) {
       loadNetworks();
+    } else if (networks.length > 0 && isChainlistCacheStale()) {
+      setIsUpdating(true);
+      refreshChainlistNetworksInBackground()
+        .then((fresh) => {
+          setNetworks(fresh);
+          setLastUpdated(getChainlistLastUpdated());
+        })
+        .catch((error) => {
+          // Keep showing the stale list — a failed refresh must not
+          // wipe out the networks the user can already see.
+          console.error('Background Chainlist refresh failed, keeping the previous list:', error);
+        })
+        .finally(() => setIsUpdating(false));
     }
-  }, [isOpen, networks.length, loadError]);
+  }, [isOpen]);
 
   // Fetch networks from Chainlist
-  const loadNetworks = async () => {
+  const loadNetworks = async (forceRefresh = false) => {
     try {
       setIsLoading(true);
       setLoadError(null);
-      const chainlistNetworks = await fetchChainlistNetworks();
+      const chainlistNetworks = await fetchChainlistNetworks({ forceRefresh });
       setNetworks(chainlistNetworks);
+      setLastUpdated(getChainlistLastUpdated());
     } catch (error: any) {
       // The old code only toasted here and left the modal showing
       // "Loading networks from Chainlist..." forever (networks stayed
@@ -50,10 +75,26 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
     }
   };
 
-  // Filter networks based on search query
-  const filteredNetworks = useMemo(() => {
-    return searchNetworks(networks, searchQuery);
+  // Filter networks based on search query. With no query, show the list
+  // alphabetically instead of a dead end — the old modal showed only
+  // "Start typing to search" and gave no way to browse what Chainlist
+  // actually has.
+  const allMatches = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return [...networks].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return searchNetworks(networks, searchQuery, Number.MAX_SAFE_INTEGER);
   }, [networks, searchQuery]);
+
+  const filteredNetworks = useMemo(
+    () => allMatches.slice(0, visibleLimit),
+    [allMatches, visibleLimit]
+  );
+
+  // Reset the visible count whenever the query changes.
+  useEffect(() => {
+    setVisibleLimit(10);
+  }, [searchQuery]);
 
   // Handle network selection
   const handleSelectNetwork = (network: ChainlistNetwork) => {
@@ -114,6 +155,27 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
               </div>
             </div>
           </div>
+
+          {/* Live list status: fetched straight from Chainlist's API, so
+              the count and the "updated" time prove the list is current
+              instead of a stale bundled copy. */}
+          <div className="mt-3 flex justify-between items-center text-xs text-gray-500">
+            <span>
+              {networks.length > 0
+                ? `${networks.length.toLocaleString()} networks from Chainlist${lastUpdated ? ` · updated ${Math.max(1, Math.round((Date.now() - lastUpdated.getTime()) / 60000))} min ago` : ''}`
+                : 'Loading the latest list from Chainlist…'}
+              {isUpdating && ' · updating…'}
+            </span>
+            <button
+              type="button"
+              onClick={() => loadNetworks(true)}
+              disabled={isLoading || isUpdating}
+              className="text-blue-600 hover:text-blue-800 disabled:opacity-50"
+              title="Re-fetch the latest list from Chainlist now"
+            >
+              ↻ Refresh list
+            </button>
+          </div>
         </div>
         
         <div className="flex-1 overflow-y-auto p-6">
@@ -127,7 +189,7 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
                 Could not load networks from Chainlist. Check your connection and try again.
               </p>
               <button
-                onClick={loadNetworks}
+                onClick={() => loadNetworks(true)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 Retry
@@ -153,6 +215,10 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
             </div>
           ) : (
             <div className="space-y-4">
+              <p className="text-xs text-gray-500">
+                Showing {filteredNetworks.length} of {allMatches.length.toLocaleString()} matching networks
+                {searchQuery ? ` for "${searchQuery}"` : ' (browse or search to narrow down)'}
+              </p>
               {filteredNetworks.map((network, index) => (
                 <div 
                   key={`${network.chainId}-${index}`}
@@ -185,6 +251,17 @@ export default function ChainlistSearch({ onSelect, onClose, isOpen }: Chainlist
                   )}
                 </div>
               ))}
+              {allMatches.length > filteredNetworks.length && (
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit((l) => l + 10)}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    Show more ({(allMatches.length - filteredNetworks.length).toLocaleString()} remaining)
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

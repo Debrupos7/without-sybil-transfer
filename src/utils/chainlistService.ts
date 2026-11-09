@@ -58,16 +58,32 @@ const KNOWN_TESTNET_CHAIN_IDS = new Set([
   // Note: Monad mainnet (143) is deliberately NOT in this set.
 ]);
 
-// Cache the (2.4 MB) chain list for the session: the modal used to
-// re-download it every time it opened, and a failed download left it
-// showing "Loading..." forever.
+// The Chainlist list (~2.4 MB, 3,000+ chains) is fetched live from the
+// direct API — https://chainlist.org/rpcs.json — every time it is
+// needed, NOT from a bundled copy, so chains Chainlist adds later show
+// up automatically. The old code cached the list forever for the whole
+// browser session, so a chain added after the first load never appeared
+// until the tab was reloaded. Now the cache lives for at most
+// CHAINLIST_CACHE_TTL_MS and is revalidated in the background whenever
+// the modal opens with stale data, plus a manual Refresh in the modal.
+export const CHAINLIST_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
 let cachedNetworks: ChainlistNetwork[] | null = null;
+let cachedAt = 0;
 let cachedFetch: Promise<ChainlistNetwork[]> | null = null;
 
+export const getChainlistLastUpdated = (): Date | null =>
+  cachedAt ? new Date(cachedAt) : null;
+
+export const isChainlistCacheStale = (): boolean =>
+  !cachedNetworks || Date.now() - cachedAt >= CHAINLIST_CACHE_TTL_MS;
+
 // Function to fetch networks from Chainlist
-export const fetchChainlistNetworks = async (): Promise<ChainlistNetwork[]> => {
-  if (cachedNetworks) return cachedNetworks;
-  if (cachedFetch) return cachedFetch;
+export const fetchChainlistNetworks = async (opts?: { forceRefresh?: boolean }): Promise<ChainlistNetwork[]> => {
+  const now = Date.now();
+  const fresh = cachedNetworks !== null && now - cachedAt < CHAINLIST_CACHE_TTL_MS;
+  if (cachedNetworks && fresh && !opts?.forceRefresh) return cachedNetworks;
+  if (cachedFetch && !opts?.forceRefresh) return cachedFetch;
 
   cachedFetch = (async () => {
     const controller = new AbortController();
@@ -78,8 +94,11 @@ export const fetchChainlistNetworks = async (): Promise<ChainlistNetwork[]> => {
       // It was never in that list before, so the browser refused the
       // request and the modal could never load — the main reason
       // Chainlist "stopped working".
+      // cache: 'no-store' so the browser's HTTP cache cannot serve a
+      // stale copy of the list either — freshness comes from the API.
       const response = await fetch('https://chainlist.org/rpcs.json', {
         signal: controller.signal,
+        cache: 'no-store',
       });
       if (!response.ok) {
         throw new Error(`Failed to fetch chainlist data: ${response.status} ${response.statusText}`);
@@ -93,6 +112,7 @@ export const fetchChainlistNetworks = async (): Promise<ChainlistNetwork[]> => {
         (n) => n && typeof n.chainId === 'number' && n.chainId > 0 && typeof n.name === 'string' && n.name.trim() !== ''
       );
       cachedNetworks = networks;
+      cachedAt = Date.now();
       return networks;
     } catch (error) {
       // Allow a later retry after a failure instead of caching the error.
@@ -105,6 +125,14 @@ export const fetchChainlistNetworks = async (): Promise<ChainlistNetwork[]> => {
   })();
 
   return cachedFetch;
+};
+
+// Re-fetch in the background without blocking the UI. The modal keeps
+// showing the (possibly stale) list it already has and swaps in the
+// fresh one when it arrives, so new chains appear automatically.
+export const refreshChainlistNetworksInBackground = (): Promise<ChainlistNetwork[]> => {
+  cachedFetch = null;
+  return fetchChainlistNetworks({ forceRefresh: true });
 };
 
 // A usable RPC for ethers' JsonRpcProvider: http(s) only, no ${...}
